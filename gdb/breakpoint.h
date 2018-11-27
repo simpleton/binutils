@@ -1,5 +1,5 @@
 /* Data structures associated with breakpoints in GDB.
-   Copyright (C) 1992-2015 Free Software Foundation, Inc.
+   Copyright (C) 1992-2016 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -38,6 +38,18 @@ struct bp_location;
 struct linespec_result;
 struct linespec_sals;
 struct event_location;
+
+/* Why are we removing the breakpoint from the target?  */
+
+enum remove_bp_reason
+{
+  /* A regular remove.  Remove the breakpoint and forget everything
+     about it.  */
+  REMOVE_BREAKPOINT,
+
+  /* Detach the breakpoints from a fork child.  */
+  DETACH_BREAKPOINT,
+};
 
 /* This is the maximum number of bytes a breakpoint instruction can
    take.  Feel free to increase it.  It's just used in a few places to
@@ -519,7 +531,7 @@ struct breakpoint_ops
      with the "insert" method above.  Return 0 for success, 1 if the
      breakpoint, watchpoint or catchpoint type is not supported,
      -1 for failure.  */
-  int (*remove_location) (struct bp_location *);
+  int (*remove_location) (struct bp_location *, enum remove_bp_reason reason);
 
   /* Return true if it the target has stopped due to hitting
      breakpoint location BL.  This function does not check if we
@@ -599,13 +611,15 @@ struct breakpoint_ops
 				  int, const struct breakpoint_ops *,
 				  int, int, int, unsigned);
 
-  /* Given the location (second parameter), this method decodes it
-     and provides the SAL locations related to it.  For ordinary breakpoints,
-     it calls `decode_line_full'.
+  /* Given the location (second parameter), this method decodes it and
+     provides the SAL locations related to it.  For ordinary
+     breakpoints, it calls `decode_line_full'.  If SEARCH_PSPACE is
+     not NULL, symbol search is restricted to just that program space.
 
      This function is called inside `location_to_sals'.  */
   void (*decode_location) (struct breakpoint *b,
 			   const struct event_location *location,
+			   struct program_space *search_pspace,
 			   struct symtabs_and_lines *sals);
 
   /* Return true if this breakpoint explains a signal.  See
@@ -1005,7 +1019,11 @@ struct bpstat_what
 
 /* Tell what to do about this bpstat.  */
 struct bpstat_what bpstat_what (bpstat);
-
+
+/* Run breakpoint event callbacks associated with the breakpoints that
+   triggered.  */
+extern void bpstat_run_callbacks (bpstat bs_head);
+
 /* Find the bpstat associated with a breakpoint.  NULL otherwise.  */
 bpstat bpstat_find_breakpoint (bpstat, struct breakpoint *);
 
@@ -1142,6 +1160,11 @@ extern int program_breakpoint_here_p (struct gdbarch *gdbarch, CORE_ADDR address
 extern enum breakpoint_here breakpoint_here_p (struct address_space *, 
 					       CORE_ADDR);
 
+/* Return true if an enabled breakpoint exists in the range defined by
+   ADDR and LEN, in ASPACE.  */
+extern int breakpoint_in_range_p (struct address_space *aspace,
+				  CORE_ADDR addr, ULONGEST len);
+
 extern int moribund_breakpoint_here_p (struct address_space *, CORE_ADDR);
 
 extern int breakpoint_inserted_here_p (struct address_space *, CORE_ADDR);
@@ -1191,6 +1214,7 @@ extern void init_bp_location (struct bp_location *loc,
 			      struct breakpoint *owner);
 
 extern void update_breakpoint_locations (struct breakpoint *b,
+					 struct program_space *filter_pspace,
 					 struct symtabs_and_lines sals,
 					 struct symtabs_and_lines sals_end);
 
@@ -1489,8 +1513,6 @@ extern void remove_solib_event_breakpoints (void);
    delete at next stop disposition.  */
 extern void remove_solib_event_breakpoints_at_next_stop (void);
 
-extern void remove_thread_event_breakpoints (void);
-
 extern void disable_breakpoints_in_shlibs (void);
 
 /* This function returns TRUE if ep is a catchpoint.  */
@@ -1608,11 +1630,18 @@ extern int pc_at_non_inline_function (struct address_space *aspace,
 
 extern int user_breakpoint_p (struct breakpoint *);
 
+/* Return true if this breakpoint is pending, false if not.  */
+extern int pending_breakpoint_p (struct breakpoint *);
+
 /* Attempt to determine architecture of location identified by SAL.  */
 extern struct gdbarch *get_sal_arch (struct symtab_and_line sal);
 
 extern void breakpoint_free_objfile (struct objfile *objfile);
 
 extern char *ep_parse_optional_if_clause (char **arg);
+
+/* Print the "Thread ID hit" part of "Thread ID hit Breakpoint N" to
+   UIOUT iff debugging multiple threads.  */
+extern void maybe_print_thread_hit_breakpoint (struct ui_out *uiout);
 
 #endif /* !defined (BREAKPOINT_H) */

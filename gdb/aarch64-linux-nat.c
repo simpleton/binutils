@@ -1,6 +1,6 @@
 /* Native-dependent code for GNU/Linux AArch64.
 
-   Copyright (C) 2011-2015 Free Software Foundation, Inc.
+   Copyright (C) 2011-2016 Free Software Foundation, Inc.
    Contributed by ARM Ltd.
 
    This file is part of GDB.
@@ -90,7 +90,7 @@ aarch64_add_process (pid_t pid)
 {
   struct aarch64_process_info *proc;
 
-  proc = xcalloc (1, sizeof (*proc));
+  proc = XCNEW (struct aarch64_process_info);
   proc->pid = pid;
 
   proc->next = aarch64_process_list;
@@ -457,24 +457,13 @@ aarch64_linux_new_fork (struct lwp_info *parent, pid_t child_pid)
    storage (or its descriptor).  */
 
 ps_err_e
-ps_get_thread_area (const struct ps_prochandle *ph,
+ps_get_thread_area (struct ps_prochandle *ph,
 		    lwpid_t lwpid, int idx, void **base)
 {
-  struct iovec iovec;
-  uint64_t reg;
+  int is_64bit_p
+    = (gdbarch_bfd_arch_info (target_gdbarch ())->bits_per_word == 64);
 
-  iovec.iov_base = &reg;
-  iovec.iov_len = sizeof (reg);
-
-  if (ptrace (PTRACE_GETREGSET, lwpid, NT_ARM_TLS, &iovec) != 0)
-    return PS_ERR;
-
-  /* IDX is the bias from the thread pointer to the beginning of the
-     thread descriptor.  It has to be subtracted due to implementation
-     quirks in libthread_db.  */
-  *base = (void *) (reg - idx);
-
-  return PS_OK;
+  return aarch64_ps_get_thread_area (ph, lwpid, idx, base, is_64bit_p);
 }
 
 
@@ -492,7 +481,6 @@ aarch64_linux_child_post_startup_inferior (struct target_ops *self,
   super_post_startup_inferior (self, ptid);
 }
 
-extern struct target_desc *tdesc_arm_with_vfpv3;
 extern struct target_desc *tdesc_arm_with_neon;
 
 /* Implement the "to_read_description" target_ops method.  */
@@ -500,47 +488,48 @@ extern struct target_desc *tdesc_arm_with_neon;
 static const struct target_desc *
 aarch64_linux_read_description (struct target_ops *ops)
 {
-  CORE_ADDR at_phent;
+  int ret, tid;
+  gdb_byte regbuf[VFP_REGS_SIZE];
+  struct iovec iovec;
 
-  if (target_auxv_search (ops, AT_PHENT, &at_phent) == 1)
+  tid = ptid_get_lwp (inferior_ptid);
+
+  iovec.iov_base = regbuf;
+  iovec.iov_len = VFP_REGS_SIZE;
+
+  ret = ptrace (PTRACE_GETREGSET, tid, NT_ARM_VFP, &iovec);
+  if (ret == 0)
+    return tdesc_arm_with_neon;
+  else
+    return tdesc_aarch64;
+}
+
+/* Convert a native/host siginfo object, into/from the siginfo in the
+   layout of the inferiors' architecture.  Returns true if any
+   conversion was done; false otherwise.  If DIRECTION is 1, then copy
+   from INF to NATIVE.  If DIRECTION is 0, copy from NATIVE to
+   INF.  */
+
+static int
+aarch64_linux_siginfo_fixup (siginfo_t *native, gdb_byte *inf, int direction)
+{
+  struct gdbarch *gdbarch = get_frame_arch (get_current_frame ());
+
+  /* Is the inferior 32-bit?  If so, then do fixup the siginfo
+     object.  */
+  if (gdbarch_bfd_arch_info (gdbarch)->bits_per_word == 32)
     {
-      if (at_phent == sizeof (Elf64_External_Phdr))
-	return tdesc_aarch64;
+      if (direction == 0)
+	aarch64_compat_siginfo_from_siginfo ((struct compat_siginfo *) inf,
+					     native);
       else
-	{
-	  CORE_ADDR arm_hwcap = 0;
+	aarch64_siginfo_from_compat_siginfo (native,
+					     (struct compat_siginfo *) inf);
 
-	  if (target_auxv_search (ops, AT_HWCAP, &arm_hwcap) != 1)
-	    return ops->beneath->to_read_description (ops->beneath);
-
-#ifndef COMPAT_HWCAP_VFP
-#define COMPAT_HWCAP_VFP        (1 << 6)
-#endif
-#ifndef COMPAT_HWCAP_NEON
-#define COMPAT_HWCAP_NEON       (1 << 12)
-#endif
-#ifndef COMPAT_HWCAP_VFPv3
-#define COMPAT_HWCAP_VFPv3      (1 << 13)
-#endif
-
-	  if (arm_hwcap & COMPAT_HWCAP_VFP)
-	    {
-	      char *buf;
-	      const struct target_desc *result = NULL;
-
-	      if (arm_hwcap & COMPAT_HWCAP_NEON)
-		result = tdesc_arm_with_neon;
-	      else if (arm_hwcap & COMPAT_HWCAP_VFPv3)
-		result = tdesc_arm_with_vfpv3;
-
-	      return result;
-	    }
-
-	  return NULL;
-	}
+      return 1;
     }
 
-  return tdesc_aarch64;
+  return 0;
 }
 
 /* Returns the number of hardware watchpoints of type TYPE that we can
@@ -591,10 +580,12 @@ aarch64_linux_insert_hw_breakpoint (struct target_ops *self,
 {
   int ret;
   CORE_ADDR addr = bp_tgt->placed_address = bp_tgt->reqstd_address;
-  const int len = 4;
+  int len;
   const enum target_hw_bp_type type = hw_execute;
   struct aarch64_debug_reg_state *state
     = aarch64_get_debug_reg_state (ptid_get_pid (inferior_ptid));
+
+  gdbarch_breakpoint_from_pc (gdbarch, &addr, &len);
 
   if (show_debug_regs)
     fprintf_unfiltered
@@ -623,10 +614,12 @@ aarch64_linux_remove_hw_breakpoint (struct target_ops *self,
 {
   int ret;
   CORE_ADDR addr = bp_tgt->placed_address;
-  const int len = 4;
+  int len = 4;
   const enum target_hw_bp_type type = hw_execute;
   struct aarch64_debug_reg_state *state
     = aarch64_get_debug_reg_state (ptid_get_pid (inferior_ptid));
+
+  gdbarch_breakpoint_from_pc (gdbarch, &addr, &len);
 
   if (show_debug_regs)
     fprintf_unfiltered
@@ -717,38 +710,7 @@ static int
 aarch64_linux_region_ok_for_hw_watchpoint (struct target_ops *self,
 					   CORE_ADDR addr, int len)
 {
-  CORE_ADDR aligned_addr;
-
-  /* Can not set watchpoints for zero or negative lengths.  */
-  if (len <= 0)
-    return 0;
-
-  /* Must have hardware watchpoint debug register(s).  */
-  if (aarch64_num_wp_regs == 0)
-    return 0;
-
-  /* We support unaligned watchpoint address and arbitrary length,
-     as long as the size of the whole watched area after alignment
-     doesn't exceed size of the total area that all watchpoint debug
-     registers can watch cooperatively.
-
-     This is a very relaxed rule, but unfortunately there are
-     limitations, e.g. false-positive hits, due to limited support of
-     hardware debug registers in the kernel.  See comment above
-     aarch64_align_watchpoint for more information.  */
-
-  aligned_addr = addr & ~(AARCH64_HWP_MAX_LEN_PER_REG - 1);
-  if (aligned_addr + aarch64_num_wp_regs * AARCH64_HWP_MAX_LEN_PER_REG
-      < addr + len)
-    return 0;
-
-  /* All tests passed so we are likely to be able to set the watchpoint.
-     The reason that it is 'likely' rather than 'must' is because
-     we don't check the current usage of the watchpoint registers, and
-     there may not be enough registers available for this watchpoint.
-     Ideally we should check the cached debug register state, however
-     the checking is costly.  */
-  return 1;
+  return aarch64_linux_region_ok_for_watchpoint (addr, len);
 }
 
 /* Implement the "to_stopped_data_address" target_ops method.  */
@@ -810,6 +772,14 @@ aarch64_linux_watchpoint_addr_within_range (struct target_ops *target,
   return start <= addr && start + length - 1 >= addr;
 }
 
+/* Implement the "to_can_do_single_step" target_ops method.  */
+
+static int
+aarch64_linux_can_do_single_step (struct target_ops *target)
+{
+  return 1;
+}
+
 /* Define AArch64 maintenance commands.  */
 
 static void
@@ -861,6 +831,7 @@ _initialize_aarch64_linux_nat (void)
   t->to_stopped_data_address = aarch64_linux_stopped_data_address;
   t->to_watchpoint_addr_within_range =
     aarch64_linux_watchpoint_addr_within_range;
+  t->to_can_do_single_step = aarch64_linux_can_do_single_step;
 
   /* Override the GNU/Linux inferior startup hook.  */
   super_post_startup_inferior = t->to_post_startup_inferior;
@@ -872,4 +843,7 @@ _initialize_aarch64_linux_nat (void)
   linux_nat_set_new_fork (t, aarch64_linux_new_fork);
   linux_nat_set_forget_process (t, aarch64_forget_process);
   linux_nat_set_prepare_to_resume (t, aarch64_linux_prepare_to_resume);
+
+  /* Add our siginfo layout converter.  */
+  linux_nat_set_siginfo_fixup (t, aarch64_linux_siginfo_fixup);
 }

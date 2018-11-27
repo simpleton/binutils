@@ -1,5 +1,5 @@
 /* Xtensa-specific support for 32-bit ELF.
-   Copyright (C) 2003-2015 Free Software Foundation, Inc.
+   Copyright (C) 2003-2016 Free Software Foundation, Inc.
 
    This file is part of BFD, the Binary File Descriptor library.
 
@@ -110,7 +110,6 @@ static bfd_boolean xtensa_is_proptable_section (asection *);
 static int internal_reloc_compare (const void *, const void *);
 static int internal_reloc_matches (const void *, const void *);
 static asection *xtensa_get_property_section (asection *, const char *);
-extern asection *xtensa_make_property_section (asection *, const char *);
 static flagword xtensa_get_property_predef_flags (asection *);
 
 /* Other functions called directly by the linker.  */
@@ -521,7 +520,9 @@ elf_xtensa_info_to_howto_rela (bfd *abfd ATTRIBUTE_UNUSED,
 
 static const bfd_byte elf_xtensa_be_plt_entry[PLT_ENTRY_SIZE] =
 {
+#if XSHAL_ABI == XTHAL_ABI_WINDOWED
   0x6c, 0x10, 0x04,	/* entry sp, 32 */
+#endif
   0x18, 0x00, 0x00,	/* l32r  a8, [got entry for rtld's resolver] */
   0x1a, 0x00, 0x00,	/* l32r  a10, [got entry for rtld's link map] */
   0x1b, 0x00, 0x00,	/* l32r  a11, [literal for reloc index] */
@@ -531,7 +532,9 @@ static const bfd_byte elf_xtensa_be_plt_entry[PLT_ENTRY_SIZE] =
 
 static const bfd_byte elf_xtensa_le_plt_entry[PLT_ENTRY_SIZE] =
 {
+#if XSHAL_ABI == XTHAL_ABI_WINDOWED
   0x36, 0x41, 0x00,	/* entry sp, 32 */
+#endif
   0x81, 0x00, 0x00,	/* l32r  a8, [got entry for rtld's resolver] */
   0xa1, 0x00, 0x00,	/* l32r  a10, [got entry for rtld's link map] */
   0xb1, 0x00, 0x00,	/* l32r  a11, [literal for reloc index] */
@@ -1637,7 +1640,7 @@ elf_xtensa_size_dynamic_sections (bfd *output_bfd ATTRIBUTE_UNUSED,
 		  && htab->sgotloc != NULL);
 
       /* Set the contents of the .interp section to the interpreter.  */
-      if (bfd_link_executable (info))
+      if (bfd_link_executable (info) && !info->nointerp)
 	{
 	  s = bfd_get_linker_section (dynobj, ".interp");
 	  if (s == NULL)
@@ -2317,7 +2320,7 @@ elf_xtensa_create_plt_entry (struct bfd_link_info *info,
 {
   asection *splt, *sgotplt;
   bfd_vma plt_base, got_base;
-  bfd_vma code_offset, lit_offset;
+  bfd_vma code_offset, lit_offset, abi_offset;
   int chunk;
 
   chunk = reloc_index / PLT_ENTRIES_PER_CHUNK;
@@ -2342,15 +2345,16 @@ elf_xtensa_create_plt_entry (struct bfd_link_info *info,
 	   ? elf_xtensa_be_plt_entry
 	   : elf_xtensa_le_plt_entry),
 	  PLT_ENTRY_SIZE);
+  abi_offset = XSHAL_ABI == XTHAL_ABI_WINDOWED ? 3 : 0;
   bfd_put_16 (output_bfd, l32r_offset (got_base + 0,
-				       plt_base + code_offset + 3),
-	      splt->contents + code_offset + 4);
+				       plt_base + code_offset + abi_offset),
+	      splt->contents + code_offset + abi_offset + 1);
   bfd_put_16 (output_bfd, l32r_offset (got_base + 4,
-				       plt_base + code_offset + 6),
-	      splt->contents + code_offset + 7);
+				       plt_base + code_offset + abi_offset + 3),
+	      splt->contents + code_offset + abi_offset + 4);
   bfd_put_16 (output_bfd, l32r_offset (got_base + lit_offset,
-				       plt_base + code_offset + 9),
-	      splt->contents + code_offset + 10);
+				       plt_base + code_offset + abi_offset + 6),
+	      splt->contents + code_offset + abi_offset + 7);
 
   return plt_base + code_offset;
 }
@@ -2697,12 +2701,10 @@ elf_xtensa_relocate_section (bfd *output_bfd,
 	      r = contract_asm_expansion (contents, input_size, rel,
 					  &error_message);
 	      if (r != bfd_reloc_ok)
-		{
-		  if (!((*info->callbacks->reloc_dangerous)
-			(info, error_message, input_bfd, input_section,
-			 rel->r_offset)))
-		    return FALSE;
-		}
+		(*info->callbacks->reloc_dangerous)
+		  (info, error_message,
+		   input_bfd, input_section, rel->r_offset);
+
 	      r_type = ELF32_R_TYPE (rel->r_info);
 	    }
 
@@ -2754,12 +2756,9 @@ elf_xtensa_relocate_section (bfd *output_bfd,
 		}
 	    }
 	  if (r != bfd_reloc_ok)
-	    {
-	      if (!((*info->callbacks->reloc_dangerous)
-		    (info, error_message, input_bfd, input_section,
-		     rel->r_offset)))
-		return FALSE;
-	    }
+	    (*info->callbacks->reloc_dangerous)
+	      (info, error_message,
+	       input_bfd, input_section, rel->r_offset);
 
 	  /* Done with work for relocatable link; continue with next reloc.  */
 	  continue;
@@ -2859,10 +2858,9 @@ elf_xtensa_relocate_section (bfd *output_bfd,
 		    {
 		      error_message =
 			_("dynamic relocation in read-only section");
-		      if (!((*info->callbacks->reloc_dangerous)
-			    (info, error_message, input_bfd, input_section,
-			     rel->r_offset)))
-			return FALSE;
+		      (*info->callbacks->reloc_dangerous)
+			(info, error_message,
+			 input_bfd, input_section, rel->r_offset);
 		    }
 
 		  if (dynamic_symbol)
@@ -2956,10 +2954,9 @@ elf_xtensa_relocate_section (bfd *output_bfd,
 	      {
 		error_message =
 		  _("TLS relocation invalid without dynamic sections");
-		if (!((*info->callbacks->reloc_dangerous)
-		      (info, error_message, input_bfd, input_section,
-		       rel->r_offset)))
-		  return FALSE;
+		(*info->callbacks->reloc_dangerous)
+		  (info, error_message,
+		   input_bfd, input_section, rel->r_offset);
 	      }
 	    else
 	      {
@@ -2980,10 +2977,9 @@ elf_xtensa_relocate_section (bfd *output_bfd,
 		  {
 		    error_message =
 		      _("dynamic relocation in read-only section");
-		    if (!((*info->callbacks->reloc_dangerous)
-			  (info, error_message, input_bfd, input_section,
-			   rel->r_offset)))
-		      return FALSE;
+		    (*info->callbacks->reloc_dangerous)
+		      (info, error_message,
+		       input_bfd, input_section, rel->r_offset);
 		  }
 
 		indx = h && h->dynindx != -1 ? h->dynindx : 0;
@@ -3025,12 +3021,9 @@ elf_xtensa_relocate_section (bfd *output_bfd,
 		(h && elf_xtensa_hash_entry (h) == htab->tlsbase);
 	      if (! replace_tls_insn (rel, input_bfd, input_section, contents,
 				      is_ld_model, &error_message))
-		{
-		  if (!((*info->callbacks->reloc_dangerous)
-			(info, error_message, input_bfd, input_section,
-			 rel->r_offset)))
-		    return FALSE;
-		}
+		(*info->callbacks->reloc_dangerous)
+		  (info, error_message,
+		   input_bfd, input_section, rel->r_offset);
 
 	      if (r_type != R_XTENSA_TLS_ARG || is_ld_model)
 		{
@@ -3049,10 +3042,8 @@ elf_xtensa_relocate_section (bfd *output_bfd,
 	      error_message =
 		vsprint_msg ("invalid relocation for dynamic symbol", ": %s",
 			     strlen (name) + 2, name);
-	      if (!((*info->callbacks->reloc_dangerous)
-		    (info, error_message, input_bfd, input_section,
-		     rel->r_offset)))
-		return FALSE;
+	      (*info->callbacks->reloc_dangerous)
+		(info, error_message, input_bfd, input_section, rel->r_offset);
 	      continue;
 	    }
 	  break;
@@ -3100,10 +3091,8 @@ elf_xtensa_relocate_section (bfd *output_bfd,
 					 strlen (name) + 22,
 					 name, (int) rel->r_addend);
 
-	  if (!((*info->callbacks->reloc_dangerous)
-		(info, error_message, input_bfd, input_section,
-		 rel->r_offset)))
-	    return FALSE;
+	  (*info->callbacks->reloc_dangerous)
+	    (info, error_message, input_bfd, input_section, rel->r_offset);
 	}
     }
 
@@ -3425,19 +3414,22 @@ elf_xtensa_finish_dynamic_sections (bfd *output_bfd,
 	  break;
 
 	case DT_XTENSA_GOT_LOC_OFF:
-	  dyn.d_un.d_ptr = htab->sgotloc->output_section->vma;
+	  dyn.d_un.d_ptr = (htab->sgotloc->output_section->vma
+			    + htab->sgotloc->output_offset);
 	  break;
 
 	case DT_PLTGOT:
-	  dyn.d_un.d_ptr = htab->sgot->output_section->vma;
+	  dyn.d_un.d_ptr = (htab->sgot->output_section->vma
+			    + htab->sgot->output_offset);
 	  break;
 
 	case DT_JMPREL:
-	  dyn.d_un.d_ptr = htab->srelplt->output_section->vma;
+	  dyn.d_un.d_ptr = (htab->srelplt->output_section->vma
+			    + htab->srelplt->output_offset);
 	  break;
 
 	case DT_PLTRELSZ:
-	  dyn.d_un.d_val = htab->srelplt->output_section->size;
+	  dyn.d_un.d_val = htab->srelplt->size;
 	  break;
 
 	case DT_RELASZ:
@@ -3448,7 +3440,7 @@ elf_xtensa_finish_dynamic_sections (bfd *output_bfd,
 	     for .rela.plt to follow all other relocation sections, we
 	     don't have to worry about changing the DT_RELA entry.  */
 	  if (htab->srelplt)
-	    dyn.d_un.d_val -= htab->srelplt->output_section->size;
+	    dyn.d_un.d_val -= htab->srelplt->size;
 	  break;
 	}
 

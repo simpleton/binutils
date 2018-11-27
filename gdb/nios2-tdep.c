@@ -1,5 +1,5 @@
 /* Target-machine dependent code for Nios II, for GDB.
-   Copyright (C) 2012-2015 Free Software Foundation, Inc.
+   Copyright (C) 2012-2016 Free Software Foundation, Inc.
    Contributed by Peter Brookes (pbrookes@altera.com)
    and Andrew Draper (adraper@altera.com).
    Contributed by Mentor Graphics, Inc.
@@ -138,17 +138,15 @@ static int nios2_dwarf2gdb_regno_map[] =
   NIOS2_MPUACC_REGNUM     /* 48 */
 };
 
+gdb_static_assert (ARRAY_SIZE (nios2_dwarf2gdb_regno_map) == NIOS2_NUM_REGS);
 
 /* Implement the dwarf2_reg_to_regnum gdbarch method.  */
 
 static int
 nios2_dwarf_reg_to_regnum (struct gdbarch *gdbarch, int dw_reg)
 {
-  if (dw_reg < 0 || dw_reg > NIOS2_NUM_REGS)
-    {
-      warning (_("Dwarf-2 uses unmapped register #%d"), dw_reg);
-      return dw_reg;
-    }
+  if (dw_reg < 0 || dw_reg >= NIOS2_NUM_REGS)
+    return -1;
 
   return nios2_dwarf2gdb_regno_map[dw_reg];
 }
@@ -1195,10 +1193,8 @@ nios2_analyze_prologue (struct gdbarch *gdbarch, const CORE_ADDR start_pc,
      Note that this number should not be too large, else we can
      potentially end up iterating through unmapped memory.  */
   int ninsns, max_insns = 50;
-  int regno;
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   unsigned long mach = gdbarch_bfd_arch_info (gdbarch)->mach;
-  int is_r2 = (mach == bfd_mach_nios2r2);
 
   /* Does the frame set up the FP register?  */
   int base_reg = 0;
@@ -1843,11 +1839,9 @@ nios2_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
   for (argnum = 0; argnum < nargs; argnum++)
     {
       const gdb_byte *val;
-      gdb_byte valbuf[MAX_REGISTER_SIZE];
       struct value *arg = args[argnum];
       struct type *arg_type = check_typedef (value_type (arg));
       int len = TYPE_LENGTH (arg_type);
-      enum type_code typecode = TYPE_CODE (arg_type);
 
       val = value_contents (arg);
 
@@ -1917,10 +1911,9 @@ nios2_frame_unwind_cache (struct frame_info *this_frame,
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
   CORE_ADDR current_pc;
   struct nios2_unwind_cache *cache;
-  int i;
 
   if (*this_prologue_cache)
-    return *this_prologue_cache;
+    return (struct nios2_unwind_cache *) *this_prologue_cache;
 
   cache = FRAME_OBSTACK_ZALLOC (struct nios2_unwind_cache);
   *this_prologue_cache = cache;
@@ -2025,10 +2018,9 @@ nios2_stub_frame_cache (struct frame_info *this_frame, void **this_cache)
   CORE_ADDR stack_addr;
   struct trad_frame_cache *this_trad_cache;
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
-  int num_regs = gdbarch_num_regs (gdbarch);
 
   if (*this_cache != NULL)
-    return *this_cache;
+    return (struct trad_frame_cache *) *this_cache;
   this_trad_cache = trad_frame_cache_zalloc (this_frame);
   *this_cache = this_trad_cache;
 
@@ -2083,7 +2075,6 @@ nios2_stub_frame_sniffer (const struct frame_unwind *self,
 			  struct frame_info *this_frame, void **cache)
 {
   gdb_byte dummy[4];
-  struct obj_section *s;
   CORE_ADDR pc = get_frame_address_in_block (this_frame);
 
   /* Use the stub unwinder for unreadable code.  */
@@ -2244,7 +2235,7 @@ nios2_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 {
   struct gdbarch *gdbarch;
   struct gdbarch_tdep *tdep;
-  int register_bytes, i;
+  int i;
   struct tdesc_arch_data *tdesc_data = NULL;
   const struct target_desc *tdesc = info.target_desc;
 
@@ -2284,7 +2275,7 @@ nios2_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 
   /* None found, create a new architecture from the information
      provided.  */
-  tdep = xcalloc (1, sizeof (struct gdbarch_tdep));
+  tdep = XCNEW (struct gdbarch_tdep);
   gdbarch = gdbarch_alloc (&info, tdep);
 
   /* longjmp support not enabled by default.  */

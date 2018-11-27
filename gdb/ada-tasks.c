@@ -1,4 +1,4 @@
-/* Copyright (C) 1992-2015 Free Software Foundation, Inc.
+/* Copyright (C) 1992-2016 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -248,7 +248,8 @@ get_ada_tasks_pspace_data (struct program_space *pspace)
 {
   struct ada_tasks_pspace_data *data;
 
-  data = program_space_data (pspace, ada_tasks_pspace_data_handle);
+  data = ((struct ada_tasks_pspace_data *)
+	  program_space_data (pspace, ada_tasks_pspace_data_handle));
   if (data == NULL)
     {
       data = XCNEW (struct ada_tasks_pspace_data);
@@ -275,7 +276,8 @@ get_ada_tasks_inferior_data (struct inferior *inf)
 {
   struct ada_tasks_inferior_data *data;
 
-  data = inferior_data (inf, ada_tasks_inferior_data_handle);
+  data = ((struct ada_tasks_inferior_data *)
+	  inferior_data (inf, ada_tasks_inferior_data_handle));
   if (data == NULL)
     {
       data = XCNEW (struct ada_tasks_inferior_data);
@@ -784,7 +786,7 @@ read_known_tasks_array (struct ada_tasks_inferior_data *data)
 {
   const int target_ptr_byte = TYPE_LENGTH (data->known_tasks_element);
   const int known_tasks_size = target_ptr_byte * data->known_tasks_length;
-  gdb_byte *known_tasks = alloca (known_tasks_size);
+  gdb_byte *known_tasks = (gdb_byte *) alloca (known_tasks_size);
   int i;
 
   /* Build a new list by reading the ATCBs from the Known_Tasks array
@@ -810,7 +812,7 @@ static int
 read_known_tasks_list (struct ada_tasks_inferior_data *data)
 {
   const int target_ptr_byte = TYPE_LENGTH (data->known_tasks_element);
-  gdb_byte *known_tasks = alloca (target_ptr_byte);
+  gdb_byte *known_tasks = (gdb_byte *) alloca (target_ptr_byte);
   CORE_ADDR task_id;
   const struct ada_tasks_pspace_data *pspace_data
     = get_ada_tasks_pspace_data (current_program_space);
@@ -1100,7 +1102,7 @@ print_ada_task_info (struct ui_out *uiout,
       /* Print the associated Thread ID.  */
       if (ui_out_is_mi_like_p (uiout))
         {
-	  const int thread_id = pid_to_thread_id (task_info->ptid);
+	  const int thread_id = ptid_to_global_thread_id (task_info->ptid);
 
 	  if (thread_id != 0)
 	    ui_out_field_int (uiout, "thread-id", thread_id);

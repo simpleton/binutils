@@ -1,5 +1,5 @@
 /* M16C/M32C specific support for 32-bit ELF.
-   Copyright (C) 2005-2015 Free Software Foundation, Inc.
+   Copyright (C) 2005-2016 Free Software Foundation, Inc.
 
    This file is part of BFD, the Binary File Descriptor library.
 
@@ -478,12 +478,9 @@ m32c_elf_relocate_section
 	  else if (h->root.type == bfd_link_hash_undefweak)
 	    ;
 	  else if (!bfd_link_relocatable (info))
-	    {
-	      if (! ((*info->callbacks->undefined_symbol)
-		     (info, h->root.root.string, input_bfd,
-		      input_section, rel->r_offset, TRUE)))
-		return FALSE;
-	    }
+	    (*info->callbacks->undefined_symbol) (info, h->root.root.string,
+						  input_bfd, input_section,
+						  rel->r_offset, TRUE);
 	}
 
       if (sec != NULL && discarded_section (sec))
@@ -613,15 +610,14 @@ m32c_elf_relocate_section
 	  switch (r)
 	    {
 	    case bfd_reloc_overflow:
-	      r = info->callbacks->reloc_overflow
+	      (*info->callbacks->reloc_overflow)
 		(info, (h ? &h->root : NULL), name, howto->name, (bfd_vma) 0,
 		 input_bfd, input_section, rel->r_offset);
 	      break;
 
 	    case bfd_reloc_undefined:
-	      r = info->callbacks->undefined_symbol
-		(info, name, input_bfd, input_section, rel->r_offset,
-		 TRUE);
+	      (*info->callbacks->undefined_symbol)
+		(info, name, input_bfd, input_section, rel->r_offset, TRUE);
 	      break;
 
 	    case bfd_reloc_outofrange:
@@ -642,11 +638,8 @@ m32c_elf_relocate_section
 	    }
 
 	  if (msg)
-	    r = info->callbacks->warning
-	      (info, msg, name, input_bfd, input_section, rel->r_offset);
-
-	  if (! r)
-	    return FALSE;
+	    (*info->callbacks->warning) (info, msg, name, input_bfd,
+					 input_section, rel->r_offset);
 	}
     }
 
@@ -1473,8 +1466,11 @@ m32c_elf_relax_section
       || (sec->flags & SEC_CODE) == 0)
     return TRUE;
 
-  symtab_hdr = &elf_tdata (abfd)->symtab_hdr;
-  shndx_hdr = &elf_tdata (abfd)->symtab_shndx_hdr;
+  symtab_hdr = & elf_symtab_hdr (abfd);
+  if (elf_symtab_shndx_list (abfd))
+    shndx_hdr = & elf_symtab_shndx_list (abfd)->hdr;
+  else
+    shndx_hdr = NULL;
 
   /* Get the section contents.  */
   if (elf_section_data (sec)->this_hdr.contents != NULL)
@@ -1495,7 +1491,7 @@ m32c_elf_relax_section
       symtab_hdr->contents = (bfd_byte *) intsyms;
     }
 
-  if (shndx_hdr->sh_size != 0)
+  if (shndx_hdr && shndx_hdr->sh_size != 0)
     {
       bfd_size_type amt;
 
@@ -2043,8 +2039,16 @@ m32c_elf_relax_delete_bytes
   isymend = isym + symtab_hdr->sh_info;
 
   sec_shndx  = _bfd_elf_section_from_bfd_section (abfd, sec);
-  shndx_hdr  = & elf_tdata (abfd)->symtab_shndx_hdr;
-  shndx_buf  = (Elf_External_Sym_Shndx *) shndx_hdr->contents;
+  if (elf_symtab_shndx_list (abfd))
+    {
+      shndx_hdr = & elf_symtab_shndx_list (abfd)->hdr;
+      shndx_buf  = (Elf_External_Sym_Shndx *) shndx_hdr->contents;
+    }
+  else
+    {
+      shndx_hdr = NULL;
+      shndx_buf = NULL;
+    }
   shndx = shndx_buf;
 
   for (; isym < isymend; isym++, shndx = (shndx ? shndx + 1 : NULL))

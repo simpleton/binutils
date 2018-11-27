@@ -1,6 +1,6 @@
 /* Convert a DWARF location expression to C
 
-   Copyright (C) 2014-2015 Free Software Foundation, Inc.
+   Copyright (C) 2014-2016 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -48,9 +48,9 @@ struct insn_info
 
   unsigned int label : 1;
 
-  /* Whether this instruction is DW_OP_GNU_push_tls_address.  This is
-     a hack until we can add a feature to glibc to let us properly
-     generate code for TLS.  */
+  /* Whether this instruction is DW_OP_GNU_push_tls_address or
+     DW_OP_form_tls_address.  This is a hack until we can add a
+     feature to glibc to let us properly generate code for TLS.  */
 
   unsigned int is_tls : 1;
 };
@@ -323,6 +323,7 @@ compute_stack_depth_worker (int start, int *need_tempvar,
 	  break;
 
 	case DW_OP_GNU_push_tls_address:
+	case DW_OP_form_tls_address:
 	  info[ndx].is_tls = 1;
 	  break;
 
@@ -817,15 +818,15 @@ do_compile_dwarf_expr_to_c (int indent, struct ui_file *stream,
 	case DW_OP_reg31:
 	  dwarf_expr_require_composition (op_ptr, op_end, "DW_OP_regx");
 	  pushf_register_address (indent, stream, registers_used, arch,
-				  dwarf2_reg_to_regnum_or_error (arch,
-							      op - DW_OP_reg0));
+				  dwarf_reg_to_regnum_or_error
+				    (arch, op - DW_OP_reg0));
 	  break;
 
 	case DW_OP_regx:
 	  op_ptr = safe_read_uleb128 (op_ptr, op_end, &reg);
 	  dwarf_expr_require_composition (op_ptr, op_end, "DW_OP_regx");
 	  pushf_register_address (indent, stream, registers_used, arch,
-				  dwarf2_reg_to_regnum_or_error (arch, reg));
+				  dwarf_reg_to_regnum_or_error (arch, reg));
 	  break;
 
 	case DW_OP_breg0:
@@ -862,8 +863,8 @@ do_compile_dwarf_expr_to_c (int indent, struct ui_file *stream,
 	case DW_OP_breg31:
 	  op_ptr = safe_read_sleb128 (op_ptr, op_end, &offset);
 	  pushf_register (indent, stream, registers_used, arch,
-			  dwarf2_reg_to_regnum_or_error (arch,
-							 op - DW_OP_breg0),
+			  dwarf_reg_to_regnum_or_error (arch,
+							op - DW_OP_breg0),
 			  offset);
 	  break;
 	case DW_OP_bregx:
@@ -871,7 +872,7 @@ do_compile_dwarf_expr_to_c (int indent, struct ui_file *stream,
 	    op_ptr = safe_read_uleb128 (op_ptr, op_end, &reg);
 	    op_ptr = safe_read_sleb128 (op_ptr, op_end, &offset);
 	    pushf_register (indent, stream, registers_used, arch,
-			    dwarf2_reg_to_regnum_or_error (arch, reg), offset);
+			    dwarf_reg_to_regnum_or_error (arch, reg), offset);
 	  }
 	  break;
 	case DW_OP_fbreg:

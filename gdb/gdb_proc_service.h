@@ -1,5 +1,5 @@
 /* <proc_service.h> replacement for systems that don't have it.
-   Copyright (C) 2000-2015 Free Software Foundation, Inc.
+   Copyright (C) 2000-2016 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -24,6 +24,7 @@
 #if __GNUC__ >= 4
 # pragma GCC visibility push (default)
 #endif
+#include "gregset.h"
 
 #ifdef HAVE_PROC_SERVICE_H
 
@@ -63,8 +64,6 @@ EXTERN_C_POP
 #ifdef HAVE_SYS_PROCFS_H
 #include <sys/procfs.h>
 #endif
-
-#include "gregset.h"
 
 EXTERN_C_PUSH
 
@@ -128,7 +127,7 @@ extern pid_t ps_getpid (struct ps_prochandle *);
 /* Fetch the special per-thread address associated with the given LWP.
    This call is only used on a few platforms (most use a normal register).
    The meaning of the `int' parameter is machine-dependent.  */
-extern ps_err_e ps_get_thread_area (const struct ps_prochandle *,
+extern ps_err_e ps_get_thread_area (struct ps_prochandle *,
 				    lwpid_t, int, psaddr_t *);
 
 

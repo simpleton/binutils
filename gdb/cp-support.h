@@ -1,5 +1,5 @@
 /* Helper routines for C++ support in GDB.
-   Copyright (C) 2002-2015 Free Software Foundation, Inc.
+   Copyright (C) 2002-2016 Free Software Foundation, Inc.
 
    Contributed by MontaVista Software.
    Namespace support contributed by David Carlton.
@@ -157,5 +157,9 @@ extern struct cmd_list_element *maint_cplus_cmd_list;
 /* A wrapper for bfd_demangle.  */
 
 char *gdb_demangle (const char *name, int options);
+
+/* Like gdb_demangle, but suitable for use as la_sniff_from_mangled_name.  */
+
+int gdb_sniff_from_mangled_name (const char *mangled, char **demangled);
 
 #endif /* CP_SUPPORT_H */

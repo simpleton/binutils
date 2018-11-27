@@ -1,6 +1,6 @@
 /* Python interface to inferior events.
 
-   Copyright (C) 2009-2015 Free Software Foundation, Inc.
+   Copyright (C) 2009-2016 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -52,6 +52,9 @@ typedef struct
   eventregistry_object *register_changed;
   eventregistry_object *solib_about_to_search;
   eventregistry_object *inferior_appeared;
+  eventregistry_object *breakpoint_created;
+  eventregistry_object *breakpoint_deleted;
+  eventregistry_object *breakpoint_modified;
 
   PyObject *module;
 

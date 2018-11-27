@@ -1,5 +1,5 @@
 /* NDS32-specific support for 32-bit ELF.
-   Copyright (C) 2012-2015 Free Software Foundation, Inc.
+   Copyright (C) 2012-2016 Free Software Foundation, Inc.
    Contributed by Andes Technology Corporation.
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -2300,7 +2300,7 @@ nds32_insertion_sort (void *base, size_t nmemb, size_t size,
 {
   char *ptr = (char *) base;
   int i, j;
-  char *tmp = alloca (size);
+  char *tmp = xmalloc (size);
 
   /* If i is less than j, i is inserted before j.
 
@@ -2324,6 +2324,7 @@ nds32_insertion_sort (void *base, size_t nmemb, size_t size,
       memmove (ptr + (j + 1) * size, ptr + j * size, (i - j) * size);
       memcpy (ptr + j * size, tmp, size);
     }
+  free (tmp);
 }
 
 /* Sort relocation by r_offset.
@@ -3980,7 +3981,7 @@ nds32_elf_size_dynamic_sections (bfd *output_bfd ATTRIBUTE_UNUSED,
   if (htab->root.dynamic_sections_created)
     {
       /* Set the contents of the .interp section to the interpreter.  */
-      if (!bfd_link_pic (info))
+      if (!bfd_link_pic (info) && !info->nointerp)
 	{
 	  s = bfd_get_section_by_name (dynobj, ".interp");
 	  BFD_ASSERT (s != NULL);
@@ -5423,16 +5424,14 @@ check_reloc:
 	  switch (r)
 	    {
 	    case bfd_reloc_overflow:
-	      if (!((*info->callbacks->reloc_overflow)
-		    (info, (h ? &h->root : NULL), name, howto->name,
-		     (bfd_vma) 0, input_bfd, input_section, offset)))
-		return FALSE;
+	      (*info->callbacks->reloc_overflow)
+		(info, (h ? &h->root : NULL), name, howto->name,
+		 (bfd_vma) 0, input_bfd, input_section, offset);
 	      break;
 
 	    case bfd_reloc_undefined:
-	      if (!((*info->callbacks->undefined_symbol)
-		    (info, name, input_bfd, input_section, offset, TRUE)))
-		return FALSE;
+	      (*info->callbacks->undefined_symbol)
+		(info, name, input_bfd, input_section, offset, TRUE);
 	      break;
 
 	    case bfd_reloc_outofrange:
@@ -5451,10 +5450,9 @@ check_reloc:
 	      errmsg = _("internal error: unknown error");
 	      /* Fall through.  */
 
-common_error:
-	      if (!((*info->callbacks->warning)
-		    (info, errmsg, name, input_bfd, input_section, offset)))
-		return FALSE;
+	    common_error:
+	      (*info->callbacks->warning) (info, errmsg, name, input_bfd,
+					   input_section, offset);
 	      break;
 	    }
 	}
@@ -5709,20 +5707,17 @@ nds32_elf_finish_dynamic_sections (bfd *output_bfd, struct bfd_link_info *info)
 	      break;
 
 	    case DT_PLTGOT:
-	      /* name = ".got"; */
-	      s = htab->sgot->output_section;
+	      s = htab->sgotplt;
 	      goto get_vma;
 	    case DT_JMPREL:
-	      s = htab->srelplt->output_section;
+	      s = htab->srelplt;
 	    get_vma:
-	      BFD_ASSERT (s != NULL);
-	      dyn.d_un.d_ptr = s->vma;
+	      dyn.d_un.d_ptr = s->output_section->vma + s->output_offset;
 	      bfd_elf32_swap_dyn_out (output_bfd, &dyn, dyncon);
 	      break;
 
 	    case DT_PLTRELSZ:
-	      s = htab->srelplt->output_section;
-	      BFD_ASSERT (s != NULL);
+	      s = htab->srelplt;
 	      dyn.d_un.d_val = s->size;
 	      bfd_elf32_swap_dyn_out (output_bfd, &dyn, dyncon);
 	      break;
@@ -5739,7 +5734,7 @@ nds32_elf_finish_dynamic_sections (bfd *output_bfd, struct bfd_link_info *info)
 		 about changing the DT_RELA entry.  */
 	      if (htab->srelplt != NULL)
 		{
-		  s = htab->srelplt->output_section;
+		  s = htab->srelplt;
 		  dyn.d_un.d_val -= s->size;
 		}
 	      bfd_elf32_swap_dyn_out (output_bfd, &dyn, dyncon);
@@ -6868,7 +6863,7 @@ nds32_convert_32_to_16_alu1 (bfd *abfd, uint32_t insn, uint16_t *pinsn16,
 			     int *pinsn_type)
 {
   uint16_t insn16 = 0;
-  int insn_type;
+  int insn_type = 0;
   unsigned long mach = bfd_get_mach (abfd);
 
   if (N32_SH5 (insn) != 0)
@@ -8331,7 +8326,7 @@ static Elf_Internal_Rela *
 find_relocs_at_address_addr (Elf_Internal_Rela *reloc,
 			     Elf_Internal_Rela *relocs,
 			     Elf_Internal_Rela *irelend,
-			     unsigned char reloc_type,
+			     enum elf_nds32_reloc_type reloc_type,
 			     bfd_vma offset_p)
 {
   Elf_Internal_Rela *rel_t = NULL;
@@ -8682,7 +8677,7 @@ nds32_elf_relax_delete_blanks (bfd *abfd, asection *sec,
 	      unsigned long val = 0;
 	      unsigned long mask;
 	      long before, between;
-	      long offset;
+	      long offset = 0;
 
 	      switch (ELF32_R_TYPE (irel->r_info))
 		{
@@ -10787,7 +10782,8 @@ nds32_elf_relax_loadstore (struct bfd_link_info *link_info, bfd *abfd,
 			   bfd_byte *contents, Elf_Internal_Sym *isymbuf,
 			   Elf_Internal_Shdr *symtab_hdr, int load_store_relax)
 {
-  int eliminate_sethi = 0, range_type, i;
+  int eliminate_sethi = 0, range_type;
+  unsigned int i;
   bfd_vma local_sda, laddr;
   int seq_len;	/* Original length of instruction sequence.  */
   uint32_t insn;
@@ -10807,7 +10803,7 @@ nds32_elf_relax_loadstore (struct bfd_link_info *link_info, bfd *abfd,
   *insn_len = seq_len;
 
   /* Get the high part relocation.  */
-  for (i = 0; (unsigned) i < sizeof (checked_types); i++)
+  for (i = 0; i < ARRAY_SIZE (checked_types); i++)
     {
       hi_irelfn = find_relocs_at_address_addr (irel, internal_relocs, irelend,
 					       checked_types[i], laddr);
@@ -12343,8 +12339,8 @@ nds32_elf_relax_section (bfd *abfd, asection *sec,
       Elf_Internal_Rela *tmp_rel;
 
       /* Pad to alignment boundary.  Only handle current section alignment.  */
-      sec_size_align = (sec->size + (~((-1) << sec->alignment_power)))
-		       & ((-1) << sec->alignment_power);
+      sec_size_align = (sec->size + (~((-1U) << sec->alignment_power)))
+		       & ((-1U) << sec->alignment_power);
       if ((sec_size_align - sec->size) & 0x2)
 	{
 	  insn16 = NDS32_NOP16;
@@ -13060,25 +13056,22 @@ nds32_elf_get_relocated_section_contents (bfd *abfd,
 	      switch (r)
 		{
 		case bfd_reloc_undefined:
-		  if (!((*link_info->callbacks->undefined_symbol)
-			(link_info, bfd_asymbol_name (*(*parent)->sym_ptr_ptr),
-			 input_bfd, input_section, (*parent)->address, TRUE)))
-		    goto error_return;
+		  (*link_info->callbacks->undefined_symbol)
+		    (link_info, bfd_asymbol_name (*(*parent)->sym_ptr_ptr),
+		     input_bfd, input_section, (*parent)->address, TRUE);
 		  break;
 		case bfd_reloc_dangerous:
 		  BFD_ASSERT (error_message != NULL);
-		  if (!((*link_info->callbacks->reloc_dangerous)
-			(link_info, error_message, input_bfd, input_section,
-			 (*parent)->address)))
-		    goto error_return;
+		  (*link_info->callbacks->reloc_dangerous)
+		    (link_info, error_message,
+		     input_bfd, input_section, (*parent)->address);
 		  break;
 		case bfd_reloc_overflow:
-		  if (!((*link_info->callbacks->reloc_overflow)
-			(link_info, NULL,
-			 bfd_asymbol_name (*(*parent)->sym_ptr_ptr),
-			 (*parent)->howto->name, (*parent)->addend,
-			 input_bfd, input_section, (*parent)->address)))
-		    goto error_return;
+		  (*link_info->callbacks->reloc_overflow)
+		    (link_info, NULL,
+		     bfd_asymbol_name (*(*parent)->sym_ptr_ptr),
+		     (*parent)->howto->name, (*parent)->addend,
+		     input_bfd, input_section, (*parent)->address);
 		  break;
 		case bfd_reloc_outofrange:
 		  /* PR ld/13730:

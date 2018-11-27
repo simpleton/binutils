@@ -1,4 +1,4 @@
-# Copyright (C) 2008-2015 Free Software Foundation, Inc.
+# Copyright (C) 2008-2016 Free Software Foundation, Inc.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -24,9 +24,7 @@ if {![istarget "powerpc*"] || [skip_vsx_tests]} then {
     return
 }
 
-set testfile "vsx-regs"
-set binfile ${objdir}/${subdir}/${testfile}
-set srcfile ${testfile}.c
+standard_testfile
 
 set compile_flags {debug nowarnings quiet}
 if [get_compiler_info] {

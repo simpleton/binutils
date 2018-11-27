@@ -1,6 +1,6 @@
 // options.h -- handle command line options for gold  -*- C++ -*-
 
-// Copyright (C) 2006-2015 Free Software Foundation, Inc.
+// Copyright (C) 2006-2016 Free Software Foundation, Inc.
 // Written by Ian Lance Taylor <iant@google.com>.
 
 // This file is part of gold.
@@ -644,6 +644,11 @@ class General_options
 	      N_("Allow unresolved references in shared libraries"),
 	      N_("Do not allow unresolved references in shared libraries"));
 
+  DEFINE_bool(apply_dynamic_relocs, options::TWO_DASHES, '\0', true,
+	      N_("Apply link-time values for dynamic relocations (default)"),
+	      N_("(aarch64 only) Do not apply link-time values "
+		 "for dynamic relocations"));
+
   DEFINE_bool(as_needed, options::TWO_DASHES, '\0', false,
 	      N_("Only set DT_NEEDED for shared libraries if used"),
 	      N_("Always DT_NEEDED for shared libraries"));
@@ -668,6 +673,9 @@ class General_options
 		    N_("alias for -Bdynamic"), NULL, false);
   DEFINE_bool_alias(dn, Bdynamic, options::ONE_DASH, '\0',
 		    N_("alias for -Bstatic"), NULL, true);
+
+  DEFINE_bool(be8,options::TWO_DASHES, '\0', false,
+	      N_("Output BE8 format image"), NULL);
 
   DEFINE_bool(Bgroup, options::ONE_DASH, '\0', false,
 	      N_("Use group name lookup rules for shared library"), NULL);
@@ -828,6 +836,10 @@ class General_options
 		 N_("(ARM only) Rewrite BX rn branch to ARMv4 interworking "
 		    "veneer"),
 		 NULL);
+
+  DEFINE_bool(long_plt, options::TWO_DASHES, '\0', false,
+	      N_("(ARM only) Generate long PLT entries"),
+	      N_("(ARM only) Do not generate long PLT entries"));
 
   DEFINE_bool(g, options::EXACTLY_ONE_DASH, '\0', false,
 	      N_("Ignored"), NULL);
@@ -1143,6 +1155,17 @@ class General_options
   DEFINE_string(sysroot, options::TWO_DASHES, '\0', "",
 		N_("Set target system root directory"), N_("DIR"));
 
+  DEFINE_bool(target1_rel, options::TWO_DASHES, '\0', false,
+	      N_("(ARM only) Force R_ARM_TARGET1 type to R_ARM_REL32"),
+	      NULL);
+  DEFINE_bool(target1_abs, options::TWO_DASHES, '\0', false,
+	      N_("(ARM only) Force R_ARM_TARGET1 type to R_ARM_ABS32"),
+	      NULL);
+  DEFINE_enum(target2, options::TWO_DASHES, '\0', NULL,
+	      N_("(ARM only) Set R_ARM_TARGET2 relocation type"),
+	      N_("[rel, abs, got-rel"),
+	      {"rel", "abs", "got-rel"});
+
   DEFINE_bool(trace, options::TWO_DASHES, 't', false,
 	      N_("Print the name of each input file"), NULL);
 
@@ -1284,7 +1307,7 @@ class General_options
 	      N_("Mark output as requiring executable stack"), NULL);
   DEFINE_bool(global, options::DASH_Z, '\0', false,
 	      N_("Make symbols in DSO available for subsequently loaded "
-	         "objects"), NULL);
+		 "objects"), NULL);
   DEFINE_bool(initfirst, options::DASH_Z, '\0', false,
 	      N_("Mark DSO to be initialized first at runtime"),
 	      NULL);
@@ -1327,9 +1350,11 @@ class General_options
   DEFINE_bool(origin, options::DASH_Z, '\0', false,
 	      N_("Mark DSO to indicate that needs immediate $ORIGIN "
 		 "processing at runtime"), NULL);
-  DEFINE_bool(relro, options::DASH_Z, '\0', false,
+  DEFINE_bool(relro, options::DASH_Z, '\0', DEFAULT_LD_Z_RELRO,
 	      N_("Where possible mark variables read-only after relocation"),
 	      N_("Don't mark variables read-only after relocation"));
+  DEFINE_uint64(stack_size, options::DASH_Z, '\0', 0,
+		N_("Set PT_GNU_STACK segment p_memsz to SIZE"), N_("SIZE"));
   DEFINE_bool(text, options::DASH_Z, '\0', false,
 	      N_("Do not permit relocations in read-only segments"),
 	      N_("Permit relocations in read-only segments (default)"));

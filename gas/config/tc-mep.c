@@ -1,5 +1,5 @@
 /* tc-mep.c -- Assembler for the Toshiba Media Processor.
-   Copyright (C) 2001-2015 Free Software Foundation, Inc.
+   Copyright (C) 2001-2016 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -28,7 +28,6 @@
 #include "cgen.h"
 #include "elf/common.h"
 #include "elf/mep.h"
-#include "libbfd.h"
 #include "xregex.h"
 
 /* Structure to hold all of the different components describing
@@ -195,7 +194,7 @@ static int optbits = 0;
 static int optbitset = 0;
 
 int
-md_parse_option (int c, char *arg ATTRIBUTE_UNUSED)
+md_parse_option (int c, const char *arg ATTRIBUTE_UNUSED)
 {
   int i, idx;
   switch (c)
@@ -465,7 +464,7 @@ mep_parse_operand (CGEN_CPU_DESC cd, enum cgen_parse_operand_type want,
 }
 
 void
-md_begin ()
+md_begin (void)
 {
   /* Initialize the `cgen' interface.  */
 
@@ -1382,7 +1381,7 @@ valueT
 md_section_align (segT segment, valueT size)
 {
   int align = bfd_get_section_alignment (stdoutput, segment);
-  return ((size + (1 << align) - 1) & (-1 << align));
+  return ((size + (1 << align) - 1) & -(1 << align));
 }
 
 
@@ -1934,7 +1933,7 @@ mep_cgen_record_fixup_exp (fragS *frag,
    tc_gen_reloc.  */
 
 void
-mep_frob_file ()
+mep_frob_file (void)
 {
   struct mep_hi_fixup * l;
 
@@ -2039,7 +2038,7 @@ md_number_to_chars (char *buf, valueT val, int n)
     number_to_chars_littleendian (buf, val, n);
 }
 
-char *
+const char *
 md_atof (int type, char *litP, int *sizeP)
 {
   return ieee_md_atof (type, litP, sizeP, TRUE);
@@ -2080,7 +2079,7 @@ mep_fix_adjustable (fixS *fixP)
 }
 
 bfd_vma
-mep_elf_section_letter (int letter, char **ptrmsg)
+mep_elf_section_letter (int letter, const char **ptrmsg)
 {
   if (letter == 'v')
     return SHF_MEP_VLIW;

@@ -1,6 +1,6 @@
 /* Xtensa GNU/Linux native support.
 
-   Copyright (C) 2007-2015 Free Software Foundation, Inc.
+   Copyright (C) 2007-2016 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -96,7 +96,7 @@ fill_gregset (const struct regcache *regcache,
     }
 }
 
-void
+static void
 supply_gregset_reg (struct regcache *regcache,
 		    const gdb_gregset_t *gregsetp, int regnum)
 {
@@ -253,7 +253,7 @@ store_xtregs (struct regcache *regcache, int regnum)
     perror_with_name (_("Couldn't write extended registers"));
 }
 
-void
+static void
 xtensa_linux_fetch_inferior_registers (struct target_ops *ops,
 				       struct regcache *regcache, int regnum)
 {
@@ -268,7 +268,7 @@ xtensa_linux_fetch_inferior_registers (struct target_ops *ops,
     fetch_xtregs (regcache, regnum);
 }
 
-void
+static void
 xtensa_linux_store_inferior_registers (struct target_ops *ops,
 				       struct regcache *regcache, int regnum)
 {
@@ -286,7 +286,7 @@ xtensa_linux_store_inferior_registers (struct target_ops *ops,
 /* Called by libthread_db.  */
 
 ps_err_e
-ps_get_thread_area (const struct ps_prochandle *ph,
+ps_get_thread_area (struct ps_prochandle *ph,
                     lwpid_t lwpid, int idx, void **base)
 {
   xtensa_elf_gregset_t regs;

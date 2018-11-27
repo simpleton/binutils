@@ -1,5 +1,5 @@
 /* tc-mn10300.c -- Assembler code for the Matsushita 10300
-   Copyright (C) 1996-2015 Free Software Foundation, Inc.
+   Copyright (C) 1996-2016 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -88,9 +88,6 @@ const relax_typeS md_relax_table[] =
   {0x7fffffff, -0x80000000, 8, 0},
 
 };
-
-/*  Set linkrelax here to avoid fixups in most sections.  */
-int linkrelax = 1;
 
 static int current_machine;
 
@@ -444,7 +441,7 @@ none yet\n"));
 }
 
 int
-md_parse_option (int c ATTRIBUTE_UNUSED, char *arg ATTRIBUTE_UNUSED)
+md_parse_option (int c ATTRIBUTE_UNUSED, const char *arg ATTRIBUTE_UNUSED)
 {
   return 0;
 }
@@ -455,7 +452,7 @@ md_undefined_symbol (char *name ATTRIBUTE_UNUSED)
   return 0;
 }
 
-char *
+const char *
 md_atof (int type, char *litp, int *sizep)
 {
   return ieee_md_atof (type, litp, sizep, FALSE);
@@ -905,13 +902,13 @@ md_section_align (asection *seg, valueT addr)
 {
   int align = bfd_get_section_alignment (stdoutput, seg);
 
-  return ((addr + (1 << align) - 1) & (-1 << align));
+  return ((addr + (1 << align) - 1) & -(1 << align));
 }
 
 void
 md_begin (void)
 {
-  char *prev_name = "";
+  const char *prev_name = "";
   const struct mn10300_opcode *op;
 
   mn10300_hash = hash_new ();
@@ -944,6 +941,9 @@ md_begin (void)
 
   current_machine = MN103;
 #endif
+
+  /*  Set linkrelax here to avoid fixups in most sections.  */
+  linkrelax = 1;
 }
 
 static symbolS *GOT_symbol;
@@ -1417,14 +1417,12 @@ md_assemble (char *str)
 
 	      if (strcasecmp (start, "usp") != 0)
 		{
-	      (void) restore_line_pointer (c);
-		  *input_line_pointer = c;
+		  (void) restore_line_pointer (c);
 		  input_line_pointer = hold;
 		  str = hold;
 		  goto error;
 		}
 	      (void) restore_line_pointer (c);
-	      *input_line_pointer = c;
 	      goto keep_going;
 	    }
 	  else if (operand->flags & MN10300_OPERAND_SSP)
@@ -2170,7 +2168,7 @@ tc_gen_reloc (asection *seg ATTRIBUTE_UNUSED, fixS *fixp)
   static arelent * relocs[MAX_RELOC_EXPANSION + 1];
   arelent *reloc;
 
-  reloc = xmalloc (sizeof (arelent));
+  reloc = XNEW (arelent);
 
   reloc->howto = bfd_reloc_type_lookup (stdoutput, fixp->fx_r_type);
   if (reloc->howto == NULL)
@@ -2206,7 +2204,7 @@ tc_gen_reloc (asection *seg ATTRIBUTE_UNUSED, fixS *fixp)
 	 even local symbols defined in the same section.  */
       if (ssec != absolute_section || asec != absolute_section)
 	{
-	  arelent * reloc2 = xmalloc (sizeof * reloc);
+	  arelent * reloc2 = XNEW (arelent);
 
 	  relocs[0] = reloc2;
 	  relocs[1] = reloc;
@@ -2214,7 +2212,7 @@ tc_gen_reloc (asection *seg ATTRIBUTE_UNUSED, fixS *fixp)
 	  reloc2->address = reloc->address;
 	  reloc2->howto = bfd_reloc_type_lookup (stdoutput, BFD_RELOC_MN10300_SYM_DIFF);
 	  reloc2->addend = - S_GET_VALUE (fixp->fx_subsy);
-	  reloc2->sym_ptr_ptr = xmalloc (sizeof (asymbol *));
+	  reloc2->sym_ptr_ptr = XNEW (asymbol *);
 	  *reloc2->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_subsy);
 
 	  reloc->addend = fixp->fx_offset;
@@ -2225,7 +2223,7 @@ tc_gen_reloc (asection *seg ATTRIBUTE_UNUSED, fixS *fixp)
 	    }
 	  else
 	    {
-	      reloc->sym_ptr_ptr = xmalloc (sizeof (asymbol *));
+	      reloc->sym_ptr_ptr = XNEW (asymbol *);
 	      *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
 	    }
 
@@ -2270,7 +2268,7 @@ tc_gen_reloc (asection *seg ATTRIBUTE_UNUSED, fixS *fixp)
     }
   else
     {
-      reloc->sym_ptr_ptr = xmalloc (sizeof (asymbol *));
+      reloc->sym_ptr_ptr = XNEW (asymbol *);
       *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
       reloc->addend = fixp->fx_offset;
     }
@@ -2445,7 +2443,7 @@ set_arch_mach (int mach)
 }
 
 static inline char *
-mn10300_end_of_match (char *cont, char *what)
+mn10300_end_of_match (char *cont, const char *what)
 {
   int len = strlen (what);
 

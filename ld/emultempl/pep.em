@@ -18,7 +18,7 @@ esac
 rm -f e${EMULATION_NAME}.c
 (echo;echo;echo;echo;echo)>e${EMULATION_NAME}.c # there, now line numbers match ;-)
 fragment <<EOF
-/* Copyright (C) 2006-2015 Free Software Foundation, Inc.
+/* Copyright (C) 2006-2016 Free Software Foundation, Inc.
    Written by Kai Tietz, OneVision Software GmbH&CoKg.
 
    This file is part of the GNU Binutils.
@@ -153,7 +153,6 @@ static const char *emit_build_id;
 #ifdef DLL_SUPPORT
 static int    pep_enable_stdcall_fixup = 1; /* 0=disable 1=enable (default).  */
 static char * pep_out_def_filename = NULL;
-static char * pep_implib_filename = NULL;
 static int    pep_enable_auto_image_base = 0;
 static char * pep_dll_search_prefix = NULL;
 #endif
@@ -217,7 +216,6 @@ enum options
   OPTION_STDCALL_ALIASES,
   OPTION_ENABLE_STDCALL_FIXUP,
   OPTION_DISABLE_STDCALL_FIXUP,
-  OPTION_IMPLIB_FILENAME,
   OPTION_WARN_DUPLICATE_EXPORTS,
   OPTION_IMP_COMPAT,
   OPTION_ENABLE_AUTO_IMAGE_BASE,
@@ -296,7 +294,6 @@ gld${EMULATION_NAME}_add_options
     {"add-stdcall-alias", no_argument, NULL, OPTION_STDCALL_ALIASES},
     {"enable-stdcall-fixup", no_argument, NULL, OPTION_ENABLE_STDCALL_FIXUP},
     {"disable-stdcall-fixup", no_argument, NULL, OPTION_DISABLE_STDCALL_FIXUP},
-    {"out-implib", required_argument, NULL, OPTION_IMPLIB_FILENAME},
     {"warn-duplicate-exports", no_argument, NULL, OPTION_WARN_DUPLICATE_EXPORTS},
     /* getopt() allows abbreviations, so we do this to stop it from
        treating -c as an abbreviation for these --compat-implib.  */
@@ -427,7 +424,6 @@ gld_${EMULATION_NAME}_list_options (FILE *file)
   fprintf (file, _("                                     export, place into import library instead.\n"));
   fprintf (file, _("  --export-all-symbols               Automatically export all globals to DLL\n"));
   fprintf (file, _("  --kill-at                          Remove @nn from exported symbols\n"));
-  fprintf (file, _("  --out-implib <file>                Generate import library\n"));
   fprintf (file, _("  --output-def <file>                Generate a .DEF file for the built DLL\n"));
   fprintf (file, _("  --warn-duplicate-exports           Warn about duplicate exports.\n"));
   fprintf (file, _("  --compat-implib                    Create backward compatible import libs;\n\
@@ -760,9 +756,6 @@ gld${EMULATION_NAME}_handle_option (int optc)
       break;
     case OPTION_DISABLE_STDCALL_FIXUP:
       pep_enable_stdcall_fixup = 0;
-      break;
-    case OPTION_IMPLIB_FILENAME:
-      pep_implib_filename = xstrdup (optarg);
       break;
     case OPTION_WARN_DUPLICATE_EXPORTS:
       pep_dll_warn_dup_exports = 1;
@@ -1276,7 +1269,7 @@ write_build_id (bfd *abfd)
       struct bfd_link_order *l = NULL;
       for (l = asec->map_head.link_order; l != NULL; l = l->next)
         {
-          if ((l->type == bfd_indirect_link_order))
+          if (l->type == bfd_indirect_link_order)
             {
               if (l->u.indirect.section == t->build_id.sec)
                 {
@@ -1328,7 +1321,7 @@ write_build_id (bfd *abfd)
   if (bfd_seek (abfd, asec->filepos + link_order->offset, SEEK_SET) != 0)
     return 0;
 
-  if ((bfd_bwrite (contents, size, abfd) != size))
+  if (bfd_bwrite (contents, size, abfd) != size)
     return 0;
 
   /* Construct the CodeView record.  */
@@ -1851,8 +1844,9 @@ gld_${EMULATION_NAME}_finish (void)
 	  && pep_def_file->num_exports != 0))
     {
       pep_dll_fill_sections (link_info.output_bfd, &link_info);
-      if (pep_implib_filename)
-	pep_dll_generate_implib (pep_def_file, pep_implib_filename, &link_info);
+      if (command_line.out_implib_filename)
+	pep_dll_generate_implib (pep_def_file,
+				 command_line.out_implib_filename, &link_info);
     }
 
   if (pep_out_def_filename)
@@ -1980,6 +1974,8 @@ gld_${EMULATION_NAME}_place_orphan (asection *s,
       struct orphan_save *place;
       lang_output_section_statement_type *after;
       etree_type *address;
+      flagword flags;
+      asection *nexts;
 
       if (!orphan_init_done)
 	{
@@ -1994,17 +1990,35 @@ gld_${EMULATION_NAME}_place_orphan (asection *s,
 	  orphan_init_done = 1;
 	}
 
+      flags = s->flags;
+      if (!bfd_link_relocatable (&link_info))
+	{
+	  nexts = s;
+	  while ((nexts = bfd_get_next_section_by_name (nexts->owner,
+							nexts)))
+	    if (nexts->output_section == NULL
+		&& (nexts->flags & SEC_EXCLUDE) == 0
+		&& ((nexts->flags ^ flags) & (SEC_LOAD | SEC_ALLOC)) == 0
+		&& (nexts->owner->flags & DYNAMIC) == 0
+		&& nexts->owner->usrdata != NULL
+		&& !(((lang_input_statement_type *) nexts->owner->usrdata)
+		     ->flags.just_syms))
+	      flags = (((flags ^ SEC_READONLY)
+			| (nexts->flags ^ SEC_READONLY))
+		       ^ SEC_READONLY);
+	}
+
       /* Try to put the new output section in a reasonable place based
 	 on the section name and section flags.  */
 
       place = NULL;
-      if ((s->flags & SEC_ALLOC) == 0)
+      if ((flags & SEC_ALLOC) == 0)
 	;
-      else if ((s->flags & (SEC_LOAD | SEC_HAS_CONTENTS)) == 0)
+      else if ((flags & (SEC_LOAD | SEC_HAS_CONTENTS)) == 0)
 	place = &hold[orphan_bss];
-      else if ((s->flags & SEC_READONLY) == 0)
+      else if ((flags & SEC_READONLY) == 0)
 	place = &hold[orphan_data];
-      else if ((s->flags & SEC_CODE) == 0)
+      else if ((flags & SEC_CODE) == 0)
 	{
 	  place = (!strncmp (secname, ".idata\$", 7) ? &hold[orphan_idata]
 						     : &hold[orphan_rodata]);
@@ -2019,7 +2033,8 @@ gld_${EMULATION_NAME}_place_orphan (asection *s,
 	    place->os = lang_output_section_find (place->name);
 	  after = place->os;
 	  if (after == NULL)
-	    after = lang_output_section_find_by_flags (s, &place->os, NULL);
+	    after = lang_output_section_find_by_flags (s, flags, &place->os,
+						       NULL);
 	  if (after == NULL)
 	    /* *ABS* is always the first output section statement.  */
 	    after = (&lang_output_section_statement.head

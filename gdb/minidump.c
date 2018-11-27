@@ -86,11 +86,11 @@ enum minidump_os {
 
 #define MD_CVINFOPDB70_SIGNATURE 0x53445352
 
-typedef uint32_t rva;
+typedef uint32_t relative_virtual_address;
 
 struct minidump_location_descriptor {
   uint32_t data_size;
-  rva rva;
+  relative_virtual_address rva;
 };
 
 struct minidump_memory_descriptor {
@@ -119,7 +119,7 @@ struct minidump_module {
   uint32_t size_of_image;
   uint32_t checksum;
   uint32_t time_date_stamp;
-  rva module_name_rva;
+  relative_virtual_address module_name_rva;
   struct minidump_fixed_file_info version_info;
   struct minidump_location_descriptor cv_record;
   struct minidump_location_descriptor misc_record;
@@ -155,13 +155,13 @@ struct minidump_system_info {
 
 struct minidump_link_map_32 {
   uint32_t addr;
-  rva name_rva;
+  relative_virtual_address name_rva;
   uint32_t ld;
 };
 
 struct minidump_debug_32 {
   uint32_t version;
-  rva link_map_rva;
+  relative_virtual_address link_map_rva;
   uint32_t dso_count;
   uint32_t brk;
   uint32_t ldbase;
@@ -170,14 +170,14 @@ struct minidump_debug_32 {
 
 struct minidump_link_map_64 {
   uint64_t addr;
-  rva name_rva;
+  relative_virtual_address name_rva;
   uint32_t align;
   uint64_t ld;
 };
 
 struct minidump_debug_64 {
   uint32_t version;
-  rva link_map_rva;
+  relative_virtual_address link_map_rva;
   uint32_t dso_count;
   uint32_t align;
   uint64_t brk;
@@ -628,7 +628,7 @@ minidump_special_symbol_handling (void)
 static void
 do_cleanup_so_list (void *data)
 {
-  struct so_list **head_ptr = data;
+  struct so_list **head_ptr = (struct so_list **) data;
   struct so_list *head = *head_ptr;
   struct so_list *so;
   while (head != NULL)
@@ -748,7 +748,7 @@ minidump_current_sos_enumerator (
   struct minidump_module *module,
   void *data)
 {
-  struct so_list **head_ptr = data;
+  struct so_list **head_ptr = (struct so_list **) data;
   struct so_list *so;
 
   so = minidump_make_so (abfd, module, NULL);
@@ -767,7 +767,7 @@ find_addr_enumerator (bfd *abfd,
 		      struct minidump_module *module,
 		      void *data)
 {
-  struct find_addr_context *context = data;
+  struct find_addr_context *context = (struct find_addr_context *) data;
   if (module->base_of_image <= context->addr &&
       context->addr < module->base_of_image + module->size_of_image)
     {
@@ -812,7 +812,6 @@ minidump_current_sos_via_dso_debug (bfd *abfd)
   struct minidump_link_map_64 map;
   struct minidump_module module;
   file_ptr savedpos;
-  char *name;
   int have_module;
   uint64_t search_addr;
   struct so_list *head = NULL;
@@ -832,7 +831,7 @@ minidump_current_sos_via_dso_debug (bfd *abfd)
       map = minidump_read_link_map (abfd);
       savedpos = bfd_tell (abfd);
       SEEK (map.name_rva);
-      name = minidump_read_string (abfd);
+      minidump_read_string (abfd); // name
       search_addr = map.addr;
       if (search_addr == 0)
 	search_addr = map.ld;
@@ -957,7 +956,7 @@ convert_utf16_string_to_mb (const uint16_t *str, size_t length)
   struct cleanup *cleanup;
   struct cleanup *mb_cleanup;
 
-  wctrans = xcalloc (length+1, sizeof (wchar_t));
+  wctrans = (wchar_t *) xcalloc (length+1, sizeof (wchar_t));
   cleanup = make_cleanup (xfree, wctrans);
 
   i = 0;
@@ -972,7 +971,7 @@ convert_utf16_string_to_mb (const uint16_t *str, size_t length)
   if (mblen == (size_t) -1)
     error (_ ("invalid minidump string"));
 
-  mb = xmalloc (mblen+1);
+  mb = (char *) xmalloc (mblen+1);
   mb_cleanup = make_cleanup (xfree, mb);
   memset (&ps, 0, sizeof (ps));
   wctrans_ptr = wctrans;
@@ -1016,7 +1015,7 @@ minidump_read_string (bfd *abfd)
 
   READ (&length_bytes);
 
-  rawstr = xmalloc (length_bytes);
+  rawstr = (uint16_t *) xmalloc (length_bytes);
   cleanup = make_cleanup (xfree, rawstr);
   if (bfd_bread (rawstr, length_bytes, abfd) != length_bytes)
     error (_ ("could not read minidump string"));
@@ -1047,7 +1046,7 @@ minidump_read_linux_mappings (bfd *abfd)
   if (mappings_length == (size_t) -1)
     error (_("malformed maps section: too long"));
 
-  mappings = xmalloc (mappings_length + 1);
+  mappings = (char *) xmalloc (mappings_length + 1);
   cleanup = make_cleanup (xfree, mappings);
 
   if (! bfd_get_section_contents (abfd, asect, mappings,

@@ -1,6 +1,6 @@
 /* Perform non-arithmetic operations on values, for GDB.
 
-   Copyright (C) 1986-2015 Free Software Foundation, Inc.
+   Copyright (C) 1986-2016 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -39,7 +39,6 @@
 #include "observer.h"
 #include "objfiles.h"
 #include "extension.h"
-#include "arch-utils.h"
 
 extern unsigned int overload_debug;
 /* Local functions.  */
@@ -52,7 +51,7 @@ static struct value *search_struct_field (const char *, struct value *,
 
 static struct value *search_struct_method (const char *, struct value **,
 					   struct value **,
-					   int, int *, struct type *);
+					   LONGEST, int *, struct type *);
 
 static int find_oload_champ_namespace (struct value **, int,
 				       const char *, const char *,
@@ -92,14 +91,14 @@ static struct value *value_maybe_namespace_elt (const struct type *,
 						const char *, int,
 						enum noside);
 
-static CORE_ADDR allocate_space_in_inferior (CORE_ADDR);
+static CORE_ADDR allocate_space_in_inferior (int);
 
 static struct value *cast_into_complex (struct type *, struct value *);
 
 static void find_method_list (struct value **, const char *,
-			      int, struct type *, struct fn_field **, int *,
+			      LONGEST, struct type *, struct fn_field **, int *,
 			      VEC (xmethod_worker_ptr) **,
-			      struct type **, int *);
+			      struct type **, LONGEST *);
 
 void _initialize_valops (void);
 
@@ -179,14 +178,19 @@ find_function_in_inferior (const char *name, struct objfile **objf_p)
     }
 }
 
-static CORE_ADDR
-allocate_space_in_inferior_raw_malloc (CORE_ADDR size)
+/* Allocate NBYTES of space in the inferior using the inferior's
+   malloc and return a value that is a pointer to the allocated
+   space.  */
+
+struct value *
+value_allocate_space_in_inferior (int len)
 {
   struct objfile *objf;
   struct value *val = find_function_in_inferior ("malloc", &objf);
   struct gdbarch *gdbarch = get_objfile_arch (objf);
   struct value *blocklen;
-  blocklen = value_from_longest (builtin_type (gdbarch)->builtin_int, size);
+
+  blocklen = value_from_longest (builtin_type (gdbarch)->builtin_int, len);
   val = call_function_by_hand (val, 1, &blocklen);
   if (value_logical_not (val))
     {
@@ -196,66 +200,13 @@ allocate_space_in_inferior_raw_malloc (CORE_ADDR size)
       else
 	error (_("No memory available to program: call to malloc failed"));
     }
-  return value_as_long (val);
+  return val;
 }
 
 static CORE_ADDR
-allocate_space_in_inferior_raw (CORE_ADDR size)
+allocate_space_in_inferior (int len)
 {
-  CORE_ADDR mem = 0;
-  TRY
-    {
-      mem = gdbarch_infcall_mmap (
-	target_gdbarch (),
-	size,
-	GDB_MMAP_PROT_READ | GDB_MMAP_PROT_WRITE);
-    }
-  CATCH (except, RETURN_MASK_ERROR)
-    {
-    }
-  END_CATCH;
-
-  if (mem == 0)
-    mem = allocate_space_in_inferior_raw_malloc (size);
-
-  return mem;
-}
-
-static CORE_ADDR
-allocate_space_in_inferior (CORE_ADDR size)
-{
-  static const CORE_ADDR chunk_size = 4096;
-  static const unsigned chunk_align = 16;
-  struct inferior* inferior = current_inferior ();
-
-  if (size % chunk_align)
-    size += chunk_align - (size % chunk_align);
-
-  if (size > chunk_size)
-    return allocate_space_in_inferior_raw (size);
-
-  if (inferior->memblock_pos + size >= inferior->memblock_end)
-    {
-      CORE_ADDR new_chunk = allocate_space_in_inferior_raw (chunk_size);
-      inferior->memblock_pos = new_chunk;
-      inferior->memblock_end = new_chunk + chunk_size;
-    }
-
-  inferior->memblock_pos += size;
-  return inferior->memblock_pos - size;
-}
-
-/* Allocate NBYTES of space in the inferior using the inferior's
-   malloc and return a value that is a pointer to the allocated
-   space.  */
-
-struct value *
-value_allocate_space_in_inferior (int len)
-{
-  CORE_ADDR mem = allocate_space_in_inferior (len);
-  return value_from_pointer (
-    builtin_type (target_gdbarch ())->builtin_data_ptr,
-    mem);
+  return value_as_long (value_allocate_space_in_inferior (len));
 }
 
 /* Cast struct value VAL to type TYPE and return as a value.
@@ -305,7 +256,8 @@ value_cast_structs (struct type *type, struct value *v2)
   if (TYPE_NAME (t2) != NULL)
     {
       /* Try downcasting using the run-time type of the value.  */
-      int full, top, using_enc;
+      int full, using_enc;
+      LONGEST top;
       struct type *real_type;
 
       real_type = value_rtti_type (v2, &full, &top, &using_enc);
@@ -684,7 +636,7 @@ value_reinterpret_cast (struct type *type, struct value *arg)
 static int
 dynamic_cast_check_1 (struct type *desired_type,
 		      const gdb_byte *valaddr,
-		      int embedded_offset,
+		      LONGEST embedded_offset,
 		      CORE_ADDR address,
 		      struct value *val,
 		      struct type *search_type,
@@ -696,8 +648,9 @@ dynamic_cast_check_1 (struct type *desired_type,
 
   for (i = 0; i < TYPE_N_BASECLASSES (search_type) && result_count < 2; ++i)
     {
-      int offset = baseclass_offset (search_type, i, valaddr, embedded_offset,
-				     address, val);
+      LONGEST offset = baseclass_offset (search_type, i, valaddr,
+					 embedded_offset,
+					 address, val);
 
       if (class_types_same_p (desired_type, TYPE_BASECLASS (search_type, i)))
 	{
@@ -731,7 +684,7 @@ dynamic_cast_check_1 (struct type *desired_type,
 static int
 dynamic_cast_check_2 (struct type *desired_type,
 		      const gdb_byte *valaddr,
-		      int embedded_offset,
+		      LONGEST embedded_offset,
 		      CORE_ADDR address,
 		      struct value *val,
 		      struct type *search_type,
@@ -741,7 +694,7 @@ dynamic_cast_check_2 (struct type *desired_type,
 
   for (i = 0; i < TYPE_N_BASECLASSES (search_type) && result_count < 2; ++i)
     {
-      int offset;
+      LONGEST offset;
 
       if (! BASETYPE_VIA_PUBLIC (search_type, i))
 	continue;
@@ -772,7 +725,8 @@ dynamic_cast_check_2 (struct type *desired_type,
 struct value *
 value_dynamic_cast (struct type *type, struct value *arg)
 {
-  int full, top, using_enc;
+  int full, using_enc;
+  LONGEST top;
   struct type *resolved_type = check_typedef (type);
   struct type *arg_type = check_typedef (value_type (arg));
   struct type *class_type, *rtti_type;
@@ -1003,13 +957,16 @@ value_at_lazy (struct type *type, CORE_ADDR addr)
 }
 
 void
-read_value_memory (struct value *val, int embedded_offset,
+read_value_memory (struct value *val, LONGEST embedded_offset,
 		   int stack, CORE_ADDR memaddr,
 		   gdb_byte *buffer, size_t length)
 {
   ULONGEST xfered_total = 0;
   struct gdbarch *arch = get_value_arch (val);
   int unit_size = gdbarch_addressable_memory_unit_size (arch);
+  enum target_object object;
+
+  object = stack ? TARGET_OBJECT_STACK_MEMORY : TARGET_OBJECT_MEMORY;
 
   while (xfered_total < length)
     {
@@ -1017,7 +974,7 @@ read_value_memory (struct value *val, int embedded_offset,
       ULONGEST xfered_partial;
 
       status = target_xfer_partial (current_target.beneath,
-				    TARGET_OBJECT_MEMORY, NULL,
+				    object, NULL,
 				    buffer + xfered_total * unit_size, NULL,
 				    memaddr + xfered_total,
 				    length - xfered_total,
@@ -1080,7 +1037,7 @@ value_assign (struct value *toval, struct value *fromval)
 
     case lval_internalvar_component:
       {
-	int offset = value_offset (toval);
+	LONGEST offset = value_offset (toval);
 
 	/* Are we dealing with a bitfield?
 
@@ -1167,7 +1124,7 @@ value_assign (struct value *toval, struct value *fromval)
 	if (value_bitsize (toval))
 	  {
 	    struct value *parent = value_parent (toval);
-	    int offset = value_offset (parent) + value_offset (toval);
+	    LONGEST offset = value_offset (parent) + value_offset (toval);
 	    int changed_len;
 	    gdb_byte buffer[sizeof (LONGEST)];
 	    int optim, unavail;
@@ -1429,150 +1386,19 @@ value_must_coerce_to_target (struct value *val)
    instance, strings are constructed as character arrays in GDB's
    storage, and this function copies them to the target.  */
 
-struct interned_value
-{
-  hashval_t hash;
-  const gdb_byte* contents;
-  LONGEST length;
-  CORE_ADDR addr;
-};
-
-static hashval_t
-interned_value_hash (const void* a)
-{
-  const struct interned_value* xa = a;
-  return xa->hash;
-}
-
-static int
-interned_value_eq (const void* a, const void* b)
-{
-  const struct interned_value* xa = a;
-  const struct interned_value* xb = b;
-
-  return
-    xa->length == xb->length &&
-    memcmp (xa->contents, xb->contents, xa->length) == 0;
-}
-
-static void
-interned_value_del (void* a)
-{
-    struct interned_value* xa = a;
-    xfree ((gdb_byte*) xa->contents);
-    xfree (xa);
-}
-
-static hashval_t
-interned_value_compute_hash (const gdb_byte* contents, LONGEST length)
-{
-  hashval_t hash = 0;
-  LONGEST i;
-  for (i = 0; i < length; ++i)
-    hash = 31*hash + contents[i];
-  return hash;
-}
-
-static int value_interning = 1;
-static void
-show_value_interning (struct ui_file *file, int from_tty,
-		      struct cmd_list_element *c,
-		      const char *value)
-{
-  fprintf_filtered (file, _("Combining identical inferior values "
-			    "is %s.\n"),
-		    value);
-}
-
-static void
-set_value_interning (char *args, int from_tty,
-		     struct cmd_list_element *c)
-{
-  struct inferior* inferior;
-  if (!value_interning)
-    ALL_INFERIORS (inferior)
-      if (inferior->interned_values)
-	{
-	  htab_delete (inferior->interned_values);
-	  inferior->interned_values = NULL;
-	}
-}
-
 struct value *
 value_coerce_to_target (struct value *val)
 {
-  struct inferior* inferior;
-  const struct type* type;
   LONGEST length;
-  int intern;
   CORE_ADDR addr;
 
   if (!value_must_coerce_to_target (val))
     return val;
 
-  inferior = current_inferior ();
-  type = check_typedef (value_type (val));
-  length = TYPE_LENGTH (type);
-  intern = value_interning && value_internable_p (val);
-
-  if (intern)
-    {
-      struct interned_value search_iv;
-      struct interned_value *iv;
-      void** slot;
-      const gdb_byte* contents = value_contents (val);
-      hashval_t hash = interned_value_compute_hash (contents, length);
-
-      memset (&search_iv, 0, sizeof (search_iv));
-      search_iv.contents = contents;
-      search_iv.length = length;
-      search_iv.hash = hash;
-
-      if (!inferior->interned_values)
-	inferior->interned_values = htab_create_alloc (
-	  10,
-	  interned_value_hash,
-	  interned_value_eq,
-	  interned_value_del,
-	  xcalloc,
-	  xfree);
-
-      slot = htab_find_slot (
-	inferior->interned_values,
-	&search_iv,
-	INSERT);
-
-      if (slot == NULL)
-	malloc_failure (0);
-
-      if (*slot == HTAB_EMPTY_ENTRY || *slot == HTAB_DELETED_ENTRY)
-	{
-	  iv = xcalloc (1, sizeof (*iv));
-	  iv->hash = hash;
-	  iv->length = length;
-	  iv->contents = xmalloc (length);
-	  addr = allocate_space_in_inferior (length);
-	  write_memory (addr, contents, length);
-	  memcpy ((gdb_byte*) iv->contents, contents, length);
-	  iv->addr = addr;
-	  *slot = iv;
-	}
-      else
-	{
-	  iv = *slot;
-	  addr = iv->addr;
-	}
-
-      val = value_at_lazy (value_type (val), addr);
-    }
-  else
-    {
-      addr = allocate_space_in_inferior (length);
-      write_memory (addr, value_contents (val), length);
-      val = value_at_lazy (value_type (val), addr);
-    }
-
-  return val;
+  length = TYPE_LENGTH (check_typedef (value_type (val)));
+  addr = allocate_space_in_inferior (length);
+  write_memory (addr, value_contents (val), length);
+  return value_at_lazy (value_type (val), addr);
 }
 
 /* Given a value which is an array, return a value which is a pointer
@@ -1642,13 +1468,28 @@ value_addr (struct value *arg1)
 
   if (TYPE_CODE (type) == TYPE_CODE_REF)
     {
-      /* Copy the value, but change the type from (T&) to (T*).  We
-         keep the same location information, which is efficient, and
-         allows &(&X) to get the location containing the reference.  */
-      arg2 = value_copy (arg1);
-      deprecated_set_value_type (arg2, 
-				 lookup_pointer_type (TYPE_TARGET_TYPE (type)));
-      return arg2;
+      if (value_bits_synthetic_pointer (arg1, value_embedded_offset (arg1),
+	  TARGET_CHAR_BIT * TYPE_LENGTH (type)))
+	arg1 = coerce_ref (arg1);
+      else
+	{
+	  /* Copy the value, but change the type from (T&) to (T*).  We
+	     keep the same location information, which is efficient, and
+	     allows &(&X) to get the location containing the reference.
+	     Do the same to its enclosing type for consistency.  */
+	  struct type *type_ptr
+	    = lookup_pointer_type (TYPE_TARGET_TYPE (type));
+	  struct type *enclosing_type
+	    = check_typedef (value_enclosing_type (arg1));
+	  struct type *enclosing_type_ptr
+	    = lookup_pointer_type (TYPE_TARGET_TYPE (enclosing_type));
+
+	  arg2 = value_copy (arg1);
+	  deprecated_set_value_type (arg2, type_ptr);
+	  set_value_enclosing_type (arg2, enclosing_type_ptr);
+
+	  return arg2;
+	}
     }
   if (TYPE_CODE (type) == TYPE_CODE_FUNC)
     return value_coerce_function (arg1);
@@ -1762,7 +1603,7 @@ value_array (int lowbound, int highbound, struct value **elemvec)
 {
   int nelem;
   int idx;
-  unsigned int typelength;
+  ULONGEST typelength;
   struct value *val;
   struct type *arraytype;
 
@@ -1806,7 +1647,7 @@ value_array (int lowbound, int highbound, struct value **elemvec)
 }
 
 struct value *
-value_cstring (char *ptr, ssize_t len, struct type *char_type)
+value_cstring (const char *ptr, ssize_t len, struct type *char_type)
 {
   struct value *val;
   int lowbound = current_language->string_lower_bound;
@@ -1829,7 +1670,7 @@ value_cstring (char *ptr, ssize_t len, struct type *char_type)
    string may contain embedded null bytes.  */
 
 struct value *
-value_string (char *ptr, ssize_t len, struct type *char_type)
+value_string (const char *ptr, ssize_t len, struct type *char_type)
 {
   struct value *val;
   int lowbound = current_language->string_lower_bound;
@@ -1938,7 +1779,7 @@ typecmp (int staticp, int varargs, int nargs,
 
 static void
 update_search_result (struct value **result_ptr, struct value *v,
-		      int *last_boffset, int boffset,
+		      LONGEST *last_boffset, LONGEST boffset,
 		      const char *name, struct type *type)
 {
   if (v != NULL)
@@ -1962,10 +1803,10 @@ update_search_result (struct value **result_ptr, struct value *v,
    lookup is ambiguous.  */
 
 static void
-do_search_struct_field (const char *name, struct value *arg1, int offset,
+do_search_struct_field (const char *name, struct value *arg1, LONGEST offset,
 			struct type *type, int looking_for_baseclass,
 			struct value **result_ptr,
-			int *last_boffset,
+			LONGEST *last_boffset,
 			struct type *outermost_type)
 {
   int i;
@@ -2012,7 +1853,7 @@ do_search_struct_field (const char *name, struct value *arg1, int offset,
 		   <variant field>.  */
 
 		struct value *v = NULL;
-		int new_offset = offset;
+		LONGEST new_offset = offset;
 
 		/* This is pretty gross.  In G++, the offset in an
 		   anonymous union is relative to the beginning of the
@@ -2051,7 +1892,7 @@ do_search_struct_field (const char *name, struct value *arg1, int offset,
 			     && (strcmp_iw (name, 
 					    TYPE_BASECLASS_NAME (type, 
 								 i)) == 0));
-      int boffset = value_embedded_offset (arg1) + offset;
+      LONGEST boffset = value_embedded_offset (arg1) + offset;
 
       if (BASETYPE_VIA_VIRTUAL (type, i))
 	{
@@ -2127,7 +1968,7 @@ search_struct_field (const char *name, struct value *arg1,
 		     struct type *type, int looking_for_baseclass)
 {
   struct value *result = NULL;
-  int boffset = 0;
+  LONGEST boffset = 0;
 
   do_search_struct_field (name, arg1, 0, type, looking_for_baseclass,
 			  &result, &boffset, type);
@@ -2144,7 +1985,7 @@ search_struct_field (const char *name, struct value *arg1,
 
 static struct value *
 search_struct_method (const char *name, struct value **arg1p,
-		      struct value **args, int offset,
+		      struct value **args, LONGEST offset,
 		      int *static_memfuncp, struct type *type)
 {
   int i;
@@ -2208,8 +2049,8 @@ search_struct_method (const char *name, struct value **arg1p,
 
   for (i = TYPE_N_BASECLASSES (type) - 1; i >= 0; i--)
     {
-      int base_offset;
-      int this_offset;
+      LONGEST base_offset;
+      LONGEST this_offset;
 
       if (BASETYPE_VIA_VIRTUAL (type, i))
 	{
@@ -2227,7 +2068,7 @@ search_struct_method (const char *name, struct value **arg1p,
 	      struct cleanup *back_to;
 	      CORE_ADDR address;
 
-	      tmp = xmalloc (TYPE_LENGTH (baseclass));
+	      tmp = (gdb_byte *) xmalloc (TYPE_LENGTH (baseclass));
 	      back_to = make_cleanup (xfree, tmp);
 	      address = value_address (*arg1p);
 
@@ -2385,9 +2226,7 @@ value_struct_elt_bitpos (struct value **argp, int bitpos, struct type *ftype,
 			 const char *err)
 {
   struct type *t;
-  struct value *v;
   int i;
-  int nbases;
 
   *argp = coerce_array (*argp);
 
@@ -2444,10 +2283,10 @@ value_struct_elt_bitpos (struct value **argp, int bitpos, struct type *ftype,
 
 static void
 find_method_list (struct value **argp, const char *method,
-		  int offset, struct type *type,
+		  LONGEST offset, struct type *type,
 		  struct fn_field **fn_list, int *num_fns,
 		  VEC (xmethod_worker_ptr) **xm_worker_vec,
-		  struct type **basetype, int *boffset)
+		  struct type **basetype, LONGEST *boffset)
 {
   int i;
   struct fn_field *f = NULL;
@@ -2504,7 +2343,7 @@ find_method_list (struct value **argp, const char *method,
      extension methods.  */
   for (i = TYPE_N_BASECLASSES (type) - 1; i >= 0; i--)
     {
-      int base_offset;
+      LONGEST base_offset;
 
       if (BASETYPE_VIA_VIRTUAL (type, i))
 	{
@@ -2544,10 +2383,10 @@ find_method_list (struct value **argp, const char *method,
 
 static void
 value_find_oload_method_list (struct value **argp, const char *method,
-                              int offset, struct fn_field **fn_list,
+                              LONGEST offset, struct fn_field **fn_list,
                               int *num_fns,
                               VEC (xmethod_worker_ptr) **xm_worker_vec,
-			      struct type **basetype, int *boffset)
+			      struct type **basetype, LONGEST *boffset)
 {
   struct type *t;
 
@@ -2640,7 +2479,6 @@ find_overload_match (struct value **args, int nargs,
   int method_oload_champ = -1;
   int src_method_oload_champ = -1;
   int ext_method_oload_champ = -1;
-  int src_and_ext_equal = 0;
 
   /* The measure for the current best match.  */
   struct badness_vector *method_badness = NULL;
@@ -2658,7 +2496,7 @@ find_overload_match (struct value **args, int nargs,
   /* Number of overloaded instances being considered.  */
   int num_fns = 0;
   struct type *basetype = NULL;
-  int boffset;
+  LONGEST boffset;
 
   struct cleanup *all_cleanups = make_cleanup (null_cleanup, NULL);
 
@@ -2739,7 +2577,6 @@ find_overload_match (struct value **args, int nargs,
 	  switch (compare_badness (ext_method_badness, src_method_badness))
 	    {
 	      case 0: /* Src method and xmethod are equally good.  */
-		src_and_ext_equal = 1;
 		/* If src method and xmethod are equally good, then
 		   xmethod should be the winner.  Hence, fall through to the
 		   case where a xmethod is better than the source
@@ -3080,7 +2917,7 @@ find_oload_champ_namespace_loop (struct value **args, int nargs,
 
   old_cleanups = make_cleanup (xfree, *oload_syms);
   make_cleanup (xfree, *oload_champ_bv);
-  new_namespace = alloca (namespace_len + 1);
+  new_namespace = (char *) alloca (namespace_len + 1);
   strncpy (new_namespace, qualified_name, namespace_len);
   new_namespace[namespace_len] = '\0';
   new_oload_syms = make_symbol_overload_list (func_name,
@@ -3164,7 +3001,6 @@ find_oload_champ (struct value **args, int nargs,
 {
   int ix;
   int fn_count;
-  int xm_worker_vec_n = VEC_length (xmethod_worker_ptr, xm_worker_vec);
   /* A measure of how good an overloaded instance is.  */
   struct badness_vector *bv;
   /* Index of best overloaded function.  */
@@ -3208,8 +3044,7 @@ find_oload_champ (struct value **args, int nargs,
 	  else
 	    nparms = TYPE_NFIELDS (SYMBOL_TYPE (oload_syms[ix]));
 
-	  parm_types = (struct type **)
-	    xmalloc (nparms * (sizeof (struct type *)));
+	  parm_types = XNEWVEC (struct type *, nparms);
 	  for (jj = 0; jj < nparms; jj++)
 	    parm_types[jj] = (fns_ptr != NULL
 			      ? (TYPE_FN_FIELD_ARGS (fns_ptr, ix)[jj].type)
@@ -3756,7 +3591,7 @@ value_maybe_namespace_elt (const struct type *curtype,
 
 struct type *
 value_rtti_indirect_type (struct value *v, int *full, 
-			  int *top, int *using_enc)
+			  LONGEST *top, int *using_enc)
 {
   struct value *target = NULL;
   struct type *type, *real_type, *target_type;
@@ -3829,7 +3664,7 @@ value_full_object (struct value *argp,
 {
   struct type *real_type;
   int full = 0;
-  int top = -1;
+  LONGEST top = -1;
   int using_enc = 0;
   struct value *new_val;
 
@@ -4058,13 +3893,4 @@ Show overload resolution in evaluating C++ functions."),
 			   show_overload_resolution,
 			   &setlist, &showlist);
   overload_resolution = 1;
-
-  add_setshow_boolean_cmd ("value-interning", class_support,
-			   &value_interning, _ ("\
-Set whether we combine identical inferior values."), _ ("\
-Whether we combine identical inferior values."),
-			   NULL,
-			   set_value_interning,
-			   show_value_interning,
-			   &setlist, &showlist);
 }

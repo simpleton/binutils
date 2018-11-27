@@ -1,6 +1,6 @@
 /* PPC GNU/Linux native support.
 
-   Copyright (C) 1988-2015 Free Software Foundation, Inc.
+   Copyright (C) 1988-2016 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -1528,9 +1528,8 @@ hwdebug_find_thread_points_by_tid (int tid, int alloc_new)
      if the wanted one does not exist?  */
   if (alloc_new)
     {
-      t = xmalloc (sizeof (struct thread_points));
-      t->hw_breaks
-	= xzalloc (max_slots_number * sizeof (struct hw_break_tuple));
+      t = XNEW (struct thread_points);
+      t->hw_breaks = XCNEWVEC (struct hw_break_tuple, max_slots_number);
       t->tid = tid;
       VEC_safe_push (thread_points_p, ppc_threads, t);
     }
@@ -1546,7 +1545,7 @@ hwdebug_insert_point (struct ppc_hw_breakpoint *b, int tid)
 {
   int i;
   long slot;
-  struct ppc_hw_breakpoint *p = xmalloc (sizeof (struct ppc_hw_breakpoint));
+  struct ppc_hw_breakpoint *p = XNEW (struct ppc_hw_breakpoint);
   struct hw_break_tuple *hw_breaks;
   struct cleanup *c = make_cleanup (xfree, p);
   struct thread_points *t;
@@ -1720,7 +1719,7 @@ get_trigger_type (enum target_hw_bp_type type)
 
 static int
 ppc_linux_insert_mask_watchpoint (struct target_ops *ops, CORE_ADDR addr,
-				  CORE_ADDR mask, int rw)
+				  CORE_ADDR mask, enum target_hw_bp_type rw)
 {
   struct lwp_info *lp;
   struct ppc_hw_breakpoint p;
@@ -1748,7 +1747,7 @@ ppc_linux_insert_mask_watchpoint (struct target_ops *ops, CORE_ADDR addr,
 
 static int
 ppc_linux_remove_mask_watchpoint (struct target_ops *ops, CORE_ADDR addr,
-				  CORE_ADDR mask, int rw)
+				  CORE_ADDR mask, enum target_hw_bp_type rw)
 {
   struct lwp_info *lp;
   struct ppc_hw_breakpoint p;
@@ -2420,7 +2419,8 @@ ppc_linux_read_description (struct target_ops *ops)
 	perror_with_name (_("Unable to fetch SPE registers"));
     }
 
-  if (have_ptrace_getsetvsxregs)
+  if (have_ptrace_getsetvsxregs
+      && (ppc_linux_get_hwcap () & PPC_FEATURE_HAS_VSX))
     {
       gdb_vsxregset_t vsxregset;
 
@@ -2433,7 +2433,8 @@ ppc_linux_read_description (struct target_ops *ops)
 	perror_with_name (_("Unable to fetch VSX registers"));
     }
 
-  if (have_ptrace_getvrregs)
+  if (have_ptrace_getvrregs
+      && (ppc_linux_get_hwcap () & PPC_FEATURE_HAS_ALTIVEC))
     {
       gdb_vrregset_t vrregset;
 

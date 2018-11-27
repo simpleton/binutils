@@ -1,6 +1,6 @@
 /* Python interface to inferiors.
 
-   Copyright (C) 2009-2015 Free Software Foundation, Inc.
+   Copyright (C) 2009-2016 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -282,7 +282,7 @@ inferior_to_inferior_object (struct inferior *inferior)
 {
   inferior_object *inf_obj;
 
-  inf_obj = inferior_data (inferior, infpy_inf_data_key);
+  inf_obj = (inferior_object *) inferior_data (inferior, infpy_inf_data_key);
   if (!inf_obj)
     {
       inf_obj = PyObject_New (inferior_object, &inferior_object_type);
@@ -372,7 +372,7 @@ add_thread_object (struct thread_info *tp)
 
   inf_obj = (inferior_object *) thread_obj->inf_obj;
 
-  entry = xmalloc (sizeof (struct threadlist_entry));
+  entry = XNEW (struct threadlist_entry);
   entry->thread_obj = thread_obj;
   entry->next = inf_obj->threads;
 
@@ -507,7 +507,7 @@ infpy_get_have_execution (PyObject *self, void *closure)
 static int
 build_inferior_list (struct inferior *inf, void *arg)
 {
-  PyObject *list = arg;
+  PyObject *list = (PyObject *) arg;
   PyObject *inferior = inferior_to_inferior_object (inf);
   int success = 0;
 
@@ -556,7 +556,7 @@ static PyObject *
 infpy_read_memory (PyObject *self, PyObject *args, PyObject *kw)
 {
   CORE_ADDR addr, length;
-  void *buffer = NULL;
+  gdb_byte *buffer = NULL;
   membuf_object *membuf_obj;
   PyObject *addr_obj, *length_obj, *result;
   static char *keywords[] = { "address", "length", NULL };
@@ -571,7 +571,7 @@ infpy_read_memory (PyObject *self, PyObject *args, PyObject *kw)
 
   TRY
     {
-      buffer = xmalloc (length);
+      buffer = (gdb_byte *) xmalloc (length);
 
       read_memory (addr, buffer, length);
     }
@@ -615,7 +615,7 @@ infpy_write_memory (PyObject *self, PyObject *args, PyObject *kw)
 {
   struct gdb_exception except = exception_none;
   Py_ssize_t buf_len;
-  const char *buffer;
+  const gdb_byte *buffer;
   CORE_ADDR addr, length;
   PyObject *addr_obj, *length_obj = NULL;
   static char *keywords[] = { "address", "buffer", "length", NULL };
@@ -627,13 +627,15 @@ infpy_write_memory (PyObject *self, PyObject *args, PyObject *kw)
 				     &length_obj))
     return NULL;
 
-  buffer = pybuf.buf;
+  buffer = (const gdb_byte *) pybuf.buf;
   buf_len = pybuf.len;
 #else
   if (! PyArg_ParseTupleAndKeywords (args, kw, "Os#|O", keywords,
 				     &addr_obj, &buffer, &buf_len,
 				     &length_obj))
     return NULL;
+
+  buffer = (const gdb_byte *) buffer;
 #endif
 
   if (get_addr_from_python (addr_obj, &addr) < 0)
@@ -646,7 +648,7 @@ infpy_write_memory (PyObject *self, PyObject *args, PyObject *kw)
 
   TRY
     {
-      write_memory_with_notification (addr, (gdb_byte *) buffer, length);
+      write_memory_with_notification (addr, buffer, length);
     }
   CATCH (ex, RETURN_MASK_ALL)
     {
@@ -768,7 +770,7 @@ infpy_search_memory (PyObject *self, PyObject *args, PyObject *kw)
   static char *keywords[] = { "address", "length", "pattern", NULL };
   PyObject *start_addr_obj, *length_obj;
   Py_ssize_t pattern_size;
-  const void *buffer;
+  const gdb_byte *buffer;
   CORE_ADDR found_addr;
   int found = 0;
 #ifdef IS_PY3K
@@ -779,10 +781,11 @@ infpy_search_memory (PyObject *self, PyObject *args, PyObject *kw)
 				     &pybuf))
     return NULL;
 
-  buffer = pybuf.buf;
+  buffer = (const gdb_byte *) pybuf.buf;
   pattern_size = pybuf.len;
 #else
   PyObject *pattern;
+  const void *vbuffer;
 
   if (! PyArg_ParseTupleAndKeywords (args, kw, "OOO", keywords,
  				     &start_addr_obj, &length_obj,
@@ -797,8 +800,10 @@ infpy_search_memory (PyObject *self, PyObject *args, PyObject *kw)
       return NULL;
     }
 
-  if (PyObject_AsReadBuffer (pattern, &buffer, &pattern_size) == -1)
+  if (PyObject_AsReadBuffer (pattern, &vbuffer, &pattern_size) == -1)
     return NULL;
+
+  buffer = (const gdb_byte *) vbuffer;
 #endif
 
   if (get_addr_from_python (start_addr_obj, &start_addr) < 0)
@@ -884,7 +889,7 @@ py_free_inferior (struct inferior *inf, void *datum)
 {
 
   struct cleanup *cleanup;
-  inferior_object *inf_obj = datum;
+  inferior_object *inf_obj = (inferior_object *) datum;
   struct threadlist_entry *th_entry, *th_tmp;
 
   if (!gdb_python_initialized)

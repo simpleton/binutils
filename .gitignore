@@ -32,6 +32,11 @@ POTFILES
 TAGS
 TAGS.sub
 
+.local.vimrc
+.lvimrc
+
+.clang-format
+
 .gdbinit
 .gdb_history
 
@@ -41,6 +46,9 @@ core
 
 lost+found
 
+# ignore ./contrib/gcc_update output
+LAST_UPDATED
+REVISION
 GPATH
 GRTAGS
 GTAGS

@@ -1,5 +1,5 @@
 # This shell script emits a C file. -*- C -*-
-# Copyright (C) 2002-2015 Free Software Foundation, Inc.
+# Copyright (C) 2002-2016 Free Software Foundation, Inc.
 #
 # This file is part of the GNU Binutils.
 #
@@ -25,7 +25,6 @@
 fragment <<EOF
 
 #include "ldctor.h"
-#include "libbfd.h"
 #include "elf-bfd.h"
 #include "elf64-ppc.h"
 #include "ldlex.h"
@@ -37,7 +36,7 @@ static void ppc_layout_sections_again (void);
 static struct ppc64_elf_params params = { NULL,
 					  &ppc_add_stub_section,
 					  &ppc_layout_sections_again,
-					  1, 0, 0,
+					  1, -1, 0,
 					  ${DEFAULT_PLT_STATIC_CHAIN-0}, -1, 0,
 					  0, -1, -1, 0};
 
@@ -699,7 +698,8 @@ PARSE_AND_LIST_PROLOGUE=${PARSE_AND_LIST_PROLOGUE}'
 #define OPTION_DOTSYMS			(OPTION_NO_SAVRES + 1)
 #define OPTION_NO_DOTSYMS		(OPTION_DOTSYMS + 1)
 #define OPTION_NO_TLS_OPT		(OPTION_NO_DOTSYMS + 1)
-#define OPTION_NO_TLS_GET_ADDR_OPT	(OPTION_NO_TLS_OPT + 1)
+#define OPTION_TLS_GET_ADDR_OPT		(OPTION_NO_TLS_OPT + 1)
+#define OPTION_NO_TLS_GET_ADDR_OPT	(OPTION_TLS_GET_ADDR_OPT + 1)
 #define OPTION_NO_OPD_OPT		(OPTION_NO_TLS_GET_ADDR_OPT + 1)
 #define OPTION_NO_TOC_OPT		(OPTION_NO_OPD_OPT + 1)
 #define OPTION_NO_MULTI_TOC		(OPTION_NO_TOC_OPT + 1)
@@ -722,6 +722,7 @@ PARSE_AND_LIST_LONGOPTS=${PARSE_AND_LIST_LONGOPTS}'
   { "save-restore-funcs", no_argument, NULL, OPTION_SAVRES },
   { "no-save-restore-funcs", no_argument, NULL, OPTION_NO_SAVRES },
   { "no-tls-optimize", no_argument, NULL, OPTION_NO_TLS_OPT },
+  { "tls-get-addr-optimize", no_argument, NULL, OPTION_TLS_GET_ADDR_OPT },
   { "no-tls-get-addr-optimize", no_argument, NULL, OPTION_NO_TLS_GET_ADDR_OPT },
   { "no-opd-optimize", no_argument, NULL, OPTION_NO_OPD_OPT },
   { "no-toc-optimize", no_argument, NULL, OPTION_NO_TOC_OPT },
@@ -784,6 +785,9 @@ PARSE_AND_LIST_OPTIONS=${PARSE_AND_LIST_OPTIONS}'
 		   ));
   fprintf (file, _("\
   --no-tls-optimize           Don'\''t try to optimize TLS accesses.\n"
+		   ));
+  fprintf (file, _("\
+  --tls-get-addr-optimize     Force use of special __tls_get_addr call.\n"
 		   ));
   fprintf (file, _("\
   --no-tls-get-addr-optimize  Don'\''t use a special __tls_get_addr call.\n"
@@ -877,8 +881,12 @@ PARSE_AND_LIST_ARGS_CASES=${PARSE_AND_LIST_ARGS_CASES}'
       no_tls_opt = 1;
       break;
 
+    case OPTION_TLS_GET_ADDR_OPT:
+      params.tls_get_addr_opt = 1;
+      break;
+
     case OPTION_NO_TLS_GET_ADDR_OPT:
-      params.no_tls_get_addr_opt = 1;
+      params.tls_get_addr_opt = 0;
       break;
 
     case OPTION_NO_OPD_OPT:
@@ -903,7 +911,7 @@ PARSE_AND_LIST_ARGS_CASES=${PARSE_AND_LIST_ARGS_CASES}'
 
     case OPTION_TRADITIONAL_FORMAT:
       no_tls_opt = 1;
-      params.no_tls_get_addr_opt = 1;
+      params.tls_get_addr_opt = 0;
       no_opd_opt = 1;
       no_toc_opt = 1;
       params.no_multi_toc = 1;

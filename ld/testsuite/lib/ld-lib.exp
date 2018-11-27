@@ -1,5 +1,5 @@
 # Support routines for LD testsuite.
-#   Copyright (C) 1994-2015 Free Software Foundation, Inc.
+#   Copyright (C) 1994-2016 Free Software Foundation, Inc.
 #
 # This file is part of the GNU Binutils.
 #
@@ -29,14 +29,18 @@ load_common_lib binutils-common.exp
 # Returns 0 otherwise.
 #
 proc at_least_gcc_version { major minor } {
+    global CC
 
     if {![info exists CC]} {
 	set CC [find_gcc]
     }
     if { $CC == "" } {
-      return 0
+	return 0
     }
     set state [remote_exec host $CC --version]
+    if { [lindex $state 0] != 0 } {
+	return 0;
+    }
     set tmp "[lindex $state 1]\n"
     # Look for (eg) 4.6.1 in the version output.
     set ver_re "\[^\\.0-9\]+(\[1-9\]\[0-9\]*)\\.(\[0-9\]+)(?:\\.\[0-9\]+)?"
@@ -588,6 +592,13 @@ proc run_dump_test { name {extra_options {}} } {
     global OBJDUMPFLAGS NMFLAGS ASFLAGS OBJCOPYFLAGS READELFFLAGS LDFLAGS
     global host_triplet runtests
     global env verbose
+    global ld_elf_shared_opt
+
+    if { [is_elf_format] && [check_shared_lib_support] } {
+	set ld_extra_opt "$ld_elf_shared_opt"
+    } else {
+	set ld_extra_opt ""
+    }
 
     if [string match "*/*" $name] {
 	set file $name
@@ -875,6 +886,7 @@ proc run_dump_test { name {extra_options {}} } {
     }
 
     set check_ld(source) ""
+    set check_ld(terminal) 0
     if { $opts(error) != "" \
          || $opts(warning) != "" \
          || $opts(error_output) != "" \
@@ -910,7 +922,7 @@ proc run_dump_test { name {extra_options {}} } {
 
 	# Add -L$srcdir/$subdir so that the linker command can use
 	# linker scripts in the source directory.
-	set cmd "$LD $LDFLAGS -L$srcdir/$subdir \
+	set cmd "$LD $ld_extra_opt $LDFLAGS -L$srcdir/$subdir \
 		   $opts(ld) -o $objfile $objfiles $opts(ld_after_inputfiles)"
 
         # If needed then check for, or add a -Map option.
@@ -975,7 +987,7 @@ proc run_dump_test { name {extra_options {}} } {
                       && ($check_ld(regex) == "") == ($comp_output == "") \
                       && [regexp $check_ld(regex) $comp_output]) \
                      || (($check_ld(source) == "file") \
-                         && ([regexp_diff "tmpdir/ld.messages" "$srcdir/$subdir/$check_ld(file)"]))) } {
+                         && (![regexp_diff "tmpdir/ld.messages" "$srcdir/$subdir/$check_ld(file)"]))) } {
                 # We have the expected output from ld.
 		if { $check_ld(terminal) || $program == "" } {
 		    pass $testname
@@ -1150,7 +1162,9 @@ proc ar_simple_create { ar aropts target objects } {
 #     in all other cases, any output from the linker during linking is
 #     treated as a sign of an error and FAILs the test.
 #
-proc run_ld_link_tests { ldtests } {
+# args is an optional list of target triplets to be xfailed.
+#
+proc run_ld_link_tests { ldtests args } {
     global ld
     global as
     global nm
@@ -1164,12 +1178,23 @@ proc run_ld_link_tests { ldtests } {
     global CFLAGS
     global runtests
     global exec_output
+    global ld_elf_shared_opt
+
+    if { [is_elf_format] && [check_shared_lib_support] } {
+	set ld_extra_opt "$ld_elf_shared_opt"
+    } else {
+	set ld_extra_opt ""
+    }
 
     foreach testitem $ldtests {
 	set testname [lindex $testitem 0]
 
 	if ![runtest_file_p $runtests $testname] then {
 	    continue
+	}
+
+	foreach target $args {
+	    setup_xfail $target
 	}
 
 	set ld_options [lindex $testitem 1]
@@ -1226,7 +1251,7 @@ proc run_ld_link_tests { ldtests } {
 	    if { ![ar_simple_create $ar $ld_options $binfile "$objfiles $ld_after"] } {
 		set failed 1
 	    }
-	} elseif { ![ld_simple_link $ld $binfile "-L$srcdir/$subdir $ld_options $objfiles $ld_after"] } {
+	} elseif { ![ld_simple_link $ld $binfile "$ld_extra_opt -L$srcdir/$subdir $ld_options $objfiles $ld_after"] } {
 	    set maybe_failed 1
 	    set ld_output "$exec_output"
 	}
@@ -1345,7 +1370,6 @@ if ![string length [info proc prune_warnings]] {
     }
 }
 
-# targets_to_xfail is a list of target triplets to be xfailed.
 # ldtests contains test-items with 3 items followed by 1 lists, 2 items
 # and 3 optional items:
 #   0:name
@@ -1357,8 +1381,9 @@ if ![string length [info proc prune_warnings]] {
 #   6:compiler flags (optional)
 #   7:language (optional)
 #   8:linker warning (optional)
+# args is an optional list of target triplets to be xfailed.
 
-proc run_ld_link_exec_tests { targets_to_xfail ldtests } {
+proc run_ld_link_exec_tests { ldtests args } {
     global ld
     global as
     global srcdir
@@ -1372,7 +1397,7 @@ proc run_ld_link_exec_tests { targets_to_xfail ldtests } {
     global exec_output
 
     foreach testitem $ldtests {
-	foreach target $targets_to_xfail {
+	foreach target $args {
 	    setup_xfail $target
 	}
 	set testname [lindex $testitem 0]
@@ -1563,7 +1588,6 @@ proc run_cc_link_tests { ldtests } {
 	    # compile only
 	} elseif { [regexp ".*\\.a$" $binfile] } {
 	    if { ![ar_simple_create $ar $ldflags $binfile "$objfiles"] } {
-		fail $testname
 		set failed 1
 	    }
 	} else {
@@ -1579,10 +1603,6 @@ proc run_cc_link_tests { ldtests } {
 		} else {
 		    set failed 1
 		}
-	    }
-
-	    if { $failed == 1 } {
-		fail $testname
 	    }
 	}
 
@@ -1644,13 +1664,12 @@ proc run_cc_link_tests { ldtests } {
 	    }
 	}
 
-	if { $failed != 0 } {
+	if { $failed } {
 	    fail $testname
-	} elseif { $is_unresolved == 0 } {
-	    pass $testname
-	} else {
+	} elseif { $is_unresolved } {
 	    unresolved $testname
-	    continue
+	} else {
+	    pass $testname
 	}
     }
 }
@@ -1664,8 +1683,7 @@ proc check_gc_sections_available { } {
     if {![info exists gc_sections_available_saved]} {
 	# Some targets don't support gc-sections despite whatever's
 	# advertised by ld's options.
-	if {   [istarget arc-*-*]
-	    || [istarget d30v-*-*]
+	if {   [istarget d30v-*-*]
 	    || [istarget dlx-*-*]
 	    || [istarget i960-*-*]
 	    || [istarget pj*-*-*]
@@ -1706,7 +1724,7 @@ proc check_gc_sections_available { } {
 
 proc check_shared_lib_support { } {
     if {![istarget aarch64*-*-elf]
-	 && ![istarget arc-*-*]
+	 && ![istarget arc*-*-elf*]
 	 && ![istarget arm*-*-elf]
 	 && ![istarget avr-*-*]
 	 && ![istarget cr16-*-*]
@@ -1718,6 +1736,7 @@ proc check_shared_lib_support { } {
 	 && ![istarget epiphany-*-*]
 	 && ![istarget fr30-*-*]
 	 && ![istarget frv-*-*]
+	 && ![istarget ft32-*-*]
 	 && ![istarget h8300-*-*]
 	 && ![istarget i860-*-*]
 	 && ![istarget i960-*-*]
@@ -1745,6 +1764,7 @@ proc check_shared_lib_support { } {
 	 && ![istarget spu-*-*]
 	 && ![istarget v850*-*-*]
 	 && ![istarget visium-*-*]
+	 && ![istarget xgate-*-*]
 	 && ![istarget xstormy16-*-*]
 	 && ![istarget *-*-irix*]
 	 && ![istarget *-*-rtems] } {
@@ -1785,15 +1805,47 @@ proc check_sysroot_available { } {
     return $ld_sysroot_available_saved
 }
 
+# Returns 1 if plugin is enabled in gcc.  Returns 0 otherwise.
+proc check_gcc_plugin_enabled { } {
+    global CC
+
+    if {![info exists CC]} {
+	set CC [find_gcc]
+    }
+    if { $CC == ""} {
+	return 0
+    }
+    set state [remote_exec host $CC -v]
+    if { [lindex $state 0] != 0 } {
+	return 0;
+    }
+    for { set i 1 } { $i < [llength $state] } { incr i } {
+	set v [lindex $state $i]
+	if { [ string match "*--disable-plugin*" $v ] } {
+	    verbose "plugin is disabled by $v"
+	    return 0;
+	}
+    }
+
+    return 1;
+}
+
 # Returns true if the target compiler supports LTO
 proc check_lto_available { } {
     global lto_available_saved
     global CC
 
     if {![info exists lto_available_saved]} {
-        if { [which $CC] == 0 } {
+        if { ![check_gcc_plugin_enabled] } {
 	    set lto_available_saved 0
 	    return 0
+	}
+	# This test will hide LTO bugs in ld.  Since GCC 4.9 adds
+	# -ffat-lto-objects, we always run LTO tests on Linux with
+	# GCC 4.9 or newer.
+	if { [istarget "*-*-linux*"] && [at_least_gcc_version 4 9] } {
+	    set lto_available_saved 1
+	    return 1
 	}
 	# Check if gcc supports -flto -fuse-linker-plugin
 	set flags ""
@@ -1810,7 +1862,9 @@ proc check_lto_available { } {
 	set f [open $src "w"]
 	puts $f "int main() { return 0; }"
 	close $f
-	remote_download host $src
+	if [is_remote host] {
+	    set src [remote_download host $src]
+	}
 	set lto_available_saved [run_host_cmd_yesno "$CC" "$flags -flto -fuse-linker-plugin $src -o $output"]
 	remote_file host delete $src
 	remote_file host delete $output
@@ -1825,9 +1879,16 @@ proc check_lto_fat_available { } {
     global CC
 
     if {![info exists lto_fat_available_saved]} {
-        if { [which $CC] == 0 } {
+        if { ![check_gcc_plugin_enabled] } {
 	    set lto_fat_available_saved 0
 	    return 0
+	}
+	# This test will hide LTO bugs in ld.  Since GCC 4.9 adds
+	# -ffat-lto-objects, we always run LTO tests on Linux with
+	# GCC 4.9 or newer.
+	if { [istarget "*-*-linux*"] && [at_least_gcc_version 4 9] } {
+	    set lto_fat_available_saved 1
+	    return 1
 	}
 	# Check if gcc supports -flto -fuse-linker-plugin
 	set flags ""
@@ -1844,7 +1905,9 @@ proc check_lto_fat_available { } {
 	set f [open $src "w"]
 	puts $f "int main() { return 0; }"
 	close $f
-	remote_download host $src
+	if [is_remote host] {
+	    set src [remote_download host $src]
+	}
 	set lto_fat_available_saved [run_host_cmd_yesno "$CC" "$flags -flto -ffat-lto-objects -fuse-linker-plugin $src -o $output"]
 	remote_file host delete $src
 	remote_file host delete $output
@@ -1859,9 +1922,16 @@ proc check_lto_shared_available { } {
     global CC
 
     if {![info exists lto_shared_available_saved]} {
-        if { [which $CC] == 0 } {
+        if { ![check_gcc_plugin_enabled] } {
 	    set lto_shared_available_saved 0
 	    return 0
+	}
+	# This test will hide LTO bugs in ld.  Since GCC 4.9 adds
+	# -ffat-lto-objects, we always run LTO tests on Linux with
+	# GCC 4.9 or newer.
+	if { [istarget "*-*-linux*"] && [at_least_gcc_version 4 9] } {
+	    set lto_shared_available_saved 1
+	    return 1
 	}
 	# Check if gcc supports -flto -fuse-linker-plugin -shared
 	set flags ""
@@ -1878,7 +1948,9 @@ proc check_lto_shared_available { } {
 	set f [open $src "w"]
 	puts $f ""
 	close $f
-	remote_download host $src
+	if [is_remote host] {
+	    set src [remote_download host $src]
+	}
 	set lto_shared_available_saved [run_host_cmd_yesno "$CC" "$flags -shared -fPIC -flto -fuse-linker-plugin $src -o $output"]
 	remote_file host delete $src
 	remote_file host delete $output
@@ -1948,7 +2020,9 @@ proc check_ifunc_available { } {
 	puts $f "void *foo (void) { return library_func1; }"
 	puts $f "__asm__(\".type library_func2, %gnu_indirect_function\");"
 	close $f
-	remote_download host $src
+	if [is_remote host] {
+	    set src [remote_download host $src]
+	}
 	set ifunc_available_saved [run_host_cmd_yesno "$CC" "$flags $src -o $output"]
 	if { $ifunc_available_saved == 1 } {
 	  set ifunc_available_saved [run_host_cmd_yesno "$output" ""]
@@ -1993,7 +2067,9 @@ proc check_ifunc_attribute_available { } {
 	puts $f "static int library_func1 (void) {return 2; }"
 	puts $f "void *foo (void) { return library_func1; }"
 	close $f
-	remote_download host $src
+	if [is_remote host] {
+	    set src [remote_download host $src]
+	}
 	set ifunc_attribute_available_saved [run_host_cmd_yesno "$CC" "$flags $src -o $output"]
 	if { $ifunc_attribute_available_saved == 1 } {
 	  set ifunc_attribute_available_saved [run_host_cmd_yesno "$output" ""]

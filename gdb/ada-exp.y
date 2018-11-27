@@ -1,5 +1,5 @@
 /* YACC parser for Ada expressions, for GDB.
-   Copyright (C) 1986-2015 Free Software Foundation, Inc.
+   Copyright (C) 1986-2016 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -50,61 +50,10 @@
 
 #define parse_type(ps) builtin_type (parse_gdbarch (ps))
 
-/* Remap normal yacc parser interface names (yyparse, yylex, yyerror, etc),
-   as well as gratuitiously global symbol names, so we can have multiple
-   yacc generated parsers in gdb.  These are only the variables
-   produced by yacc.  If other parser generators (bison, byacc, etc) produce
-   additional global names that conflict at link time, then those parser
-   generators need to be fixed instead of adding those names to this list.  */
-
-/* NOTE: This is clumsy, especially since BISON and FLEX provide --prefix
-   options.  I presume we are maintaining it to accommodate systems
-   without BISON?  (PNH) */
-
-#define	yymaxdepth ada_maxdepth
-/* ada_parse calls this after initialization */
-#define	yyparse	ada_parse_internal
-#define	yylex	ada_lex
-#define	yyerror	ada_error
-#define	yylval	ada_lval
-#define	yychar	ada_char
-#define	yydebug	ada_debug
-#define	yypact	ada_pact
-#define	yyr1	ada_r1
-#define	yyr2	ada_r2
-#define	yydef	ada_def
-#define	yychk	ada_chk
-#define	yypgo	ada_pgo
-#define	yyact	ada_act
-#define	yyexca	ada_exca
-#define yyerrflag ada_errflag
-#define yynerrs	ada_nerrs
-#define	yyps	ada_ps
-#define	yypv	ada_pv
-#define	yys	ada_s
-#define	yy_yys	ada_yys
-#define	yystate	ada_state
-#define	yytmp	ada_tmp
-#define	yyv	ada_v
-#define	yy_yyv	ada_yyv
-#define	yyval	ada_val
-#define	yylloc	ada_lloc
-#define yyreds	ada_reds		/* With YYDEBUG defined */
-#define yytoks	ada_toks		/* With YYDEBUG defined */
-#define yyname	ada_name		/* With YYDEBUG defined */
-#define yyrule	ada_rule		/* With YYDEBUG defined */
-#define yyss	ada_yyss
-#define yysslim	ada_yysslim
-#define yyssp	ada_yyssp
-#define yystacksize ada_yystacksize
-#define yyvs	ada_yyvs
-#define yyvsp	ada_yyvsp
-
-#ifndef YYDEBUG
-#define	YYDEBUG	1		/* Default to yydebug support */
-#endif
-
-#define YYFPRINTF parser_fprintf
+/* Remap normal yacc parser interface names (yyparse, yylex, yyerror,
+   etc).  */
+#define GDB_YY_REMAP_PREFIX ada_
+#include "yy-remap.h"
 
 struct name_info {
   struct symbol *sym;
@@ -876,7 +825,8 @@ write_object_renaming (struct parser_state *par_state,
   if (orig_left_context == NULL)
     orig_left_context = get_selected_block (NULL);
 
-  name = obstack_copy0 (&temp_parse_space, renamed_entity, renamed_entity_len);
+  name = (char *) obstack_copy0 (&temp_parse_space, renamed_entity,
+				 renamed_entity_len);
   ada_lookup_encoded_symbol (name, orig_left_context, VAR_DOMAIN, &sym_info);
   if (sym_info.symbol == NULL)
     error (_("Could not find renamed variable: %s"), ada_decode (name));
@@ -945,9 +895,9 @@ write_object_renaming (struct parser_state *par_state,
 	    if (end == NULL)
 	      end = renaming_expr + strlen (renaming_expr);
 
-	    index_name =
-	      obstack_copy0 (&temp_parse_space, renaming_expr,
-			     end - renaming_expr);
+	    index_name
+	      = (char *) obstack_copy0 (&temp_parse_space, renaming_expr,
+					end - renaming_expr);
 	    renaming_expr = end;
 
 	    ada_lookup_encoded_symbol (index_name, NULL, VAR_DOMAIN,
@@ -989,7 +939,7 @@ write_object_renaming (struct parser_state *par_state,
 	  if (end == NULL)
 	    end = renaming_expr + strlen (renaming_expr);
 	  field_name.length = end - renaming_expr;
-	  buf = malloc (end - renaming_expr + 1);
+	  buf = (char *) malloc (end - renaming_expr + 1);
 	  field_name.ptr = buf;
 	  strncpy (buf, renaming_expr, end - renaming_expr);
 	  buf[end - renaming_expr] = '\000';
@@ -1163,11 +1113,12 @@ static void
 write_ambiguous_var (struct parser_state *par_state,
 		     const struct block *block, char *name, int len)
 {
-  struct symbol *sym =
-    obstack_alloc (&temp_parse_space, sizeof (struct symbol));
+  struct symbol *sym = XOBNEW (&temp_parse_space, struct symbol);
+
   memset (sym, 0, sizeof (struct symbol));
   SYMBOL_DOMAIN (sym) = UNDEF_DOMAIN;
-  SYMBOL_LINKAGE_NAME (sym) = obstack_copy0 (&temp_parse_space, name, len);
+  SYMBOL_LINKAGE_NAME (sym)
+    = (const char *) obstack_copy0 (&temp_parse_space, name, len);
   SYMBOL_LANGUAGE (sym) = language_ada;
 
   write_exp_elt_opcode (par_state, OP_VAR_VALUE);
@@ -1184,7 +1135,7 @@ static int
 ada_nget_field_index (const struct type *type, const char *field_name0,
                       int field_name_len, int maybe_missing)
 {
-  char *field_name = alloca ((field_name_len + 1) * sizeof (char));
+  char *field_name = (char *) alloca ((field_name_len + 1) * sizeof (char));
 
   strncpy (field_name, field_name0, field_name_len);
   field_name[field_name_len] = '\0';
@@ -1265,7 +1216,8 @@ write_var_or_type (struct parser_state *par_state,
 
   encoded_name = ada_encode (name0.ptr);
   name_len = strlen (encoded_name);
-  encoded_name = obstack_copy0 (&temp_parse_space, encoded_name, name_len);
+  encoded_name
+    = (char *) obstack_copy0 (&temp_parse_space, encoded_name, name_len);
   for (depth = 0; depth < MAX_RENAMING_CHAIN_LENGTH; depth += 1)
     {
       int tail_index;
@@ -1318,9 +1270,9 @@ write_var_or_type (struct parser_state *par_state,
 	    case ADA_EXCEPTION_RENAMING:
 	    case ADA_SUBPROGRAM_RENAMING:
 	      {
+	        int alloc_len = renaming_len + name_len - tail_index + 1;
 		char *new_name
-		  = obstack_alloc (&temp_parse_space,
-				   renaming_len + name_len - tail_index + 1);
+		  = (char *) obstack_alloc (&temp_parse_space, alloc_len);
 		strncpy (new_name, renaming, renaming_len);
 		strcpy (new_name + renaming_len, encoded_name + tail_index);
 		encoded_name = new_name;

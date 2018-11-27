@@ -1,6 +1,6 @@
 /* Python interface to stack frames
 
-   Copyright (C) 2008-2015 Free Software Foundation, Inc.
+   Copyright (C) 2008-2016 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -340,9 +340,13 @@ frapy_function (PyObject *self, PyObject *args)
 
   TRY
     {
+      char *funname;
+      enum language funlang;
+
       FRAPY_REQUIRE_VALID (self, frame);
 
-      sym = find_pc_function (get_frame_address_in_block (frame));
+      find_frame_funname (frame, &funname, &funlang, &sym);
+      xfree (funname);
     }
   CATCH (except, RETURN_MASK_ALL)
     {

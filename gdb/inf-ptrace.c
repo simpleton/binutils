@@ -1,6 +1,6 @@
 /* Low-level child interface to ptrace.
 
-   Copyright (C) 1988-2015 Free Software Foundation, Inc.
+   Copyright (C) 1988-2016 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -240,15 +240,7 @@ inf_ptrace_detach (struct target_ops *ops, const char *args, int from_tty)
   pid_t pid = ptid_get_pid (inferior_ptid);
   int sig = 0;
 
-  if (from_tty)
-    {
-      char *exec_file = get_exec_file (0);
-      if (exec_file == 0)
-	exec_file = "";
-      printf_unfiltered (_("Detaching from program: %s, %s\n"), exec_file,
-			 target_pid_to_str (pid_to_ptid (pid)));
-      gdb_flush (gdb_stdout);
-    }
+  target_announce_detach (from_tty);
   if (args)
     sig = atoi (args);
 
@@ -264,6 +256,16 @@ inf_ptrace_detach (struct target_ops *ops, const char *args, int from_tty)
 #else
   error (_("This system does not support detaching from a process"));
 #endif
+
+  inf_ptrace_detach_success (ops);
+}
+
+/* See inf-ptrace.h.  */
+
+void
+inf_ptrace_detach_success (struct target_ops *ops)
+{
+  pid_t pid = ptid_get_pid (inferior_ptid);
 
   inferior_ptid = null_ptid;
   detach_inferior (pid);
@@ -304,7 +306,7 @@ inf_ptrace_interrupt (struct target_ops *self, ptid_t ptid)
 /* Return which PID to pass to ptrace in order to observe/control the
    tracee identified by PTID.  */
 
-static pid_t
+pid_t
 get_ptrace_pid (ptid_t ptid)
 {
   pid_t pid;
@@ -728,7 +730,7 @@ inf_ptrace_fetch_register (struct regcache *regcache, int regnum)
 
   size = register_size (gdbarch, regnum);
   gdb_assert ((size % sizeof (PTRACE_TYPE_RET)) == 0);
-  buf = alloca (size);
+  buf = (PTRACE_TYPE_RET *) alloca (size);
 
   /* Read the register contents from the inferior a chunk at a time.  */
   for (i = 0; i < size / sizeof (PTRACE_TYPE_RET); i++)
@@ -786,7 +788,7 @@ inf_ptrace_store_register (const struct regcache *regcache, int regnum)
 
   size = register_size (gdbarch, regnum);
   gdb_assert ((size % sizeof (PTRACE_TYPE_RET)) == 0);
-  buf = alloca (size);
+  buf = (PTRACE_TYPE_RET *) alloca (size);
 
   /* Write the register contents into the inferior a chunk at a time.  */
   regcache_raw_collect (regcache, regnum, buf);

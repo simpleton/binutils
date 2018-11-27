@@ -1,6 +1,6 @@
 /* Native-dependent code for GNU/Linux on MIPS processors.
 
-   Copyright (C) 2001-2015 Free Software Foundation, Inc.
+   Copyright (C) 2001-2016 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -152,7 +152,7 @@ mips64_linux_register_addr (struct gdbarch *gdbarch, int regno, int store)
 /* Fetch the thread-local storage pointer for libthread_db.  */
 
 ps_err_e
-ps_get_thread_area (const struct ps_prochandle *ph,
+ps_get_thread_area (struct ps_prochandle *ph,
                     lwpid_t lwpid, int idx, void **base)
 {
   if (ptrace (PTRACE_GET_THREAD_AREA, lwpid, NULL, base) != 0)
@@ -673,8 +673,7 @@ mips_linux_insert_watchpoint (struct target_ops *self,
     return -1;
 
   /* It fit.  Stick it on the end of the list.  */
-  new_watch = (struct mips_watchpoint *)
-    xmalloc (sizeof (struct mips_watchpoint));
+  new_watch = XNEW (struct mips_watchpoint);
   new_watch->addr = addr;
   new_watch->len = len;
   new_watch->type = type;

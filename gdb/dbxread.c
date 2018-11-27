@@ -1,5 +1,5 @@
 /* Read dbx symbol tables and convert to internal format, for GDB.
-   Copyright (C) 1986-2015 Free Software Foundation, Inc.
+   Copyright (C) 1986-2016 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -319,7 +319,7 @@ void
 init_header_files (void)
 {
   n_allocated_this_object_header_files = 10;
-  this_object_header_files = (int *) xmalloc (10 * sizeof (int));
+  this_object_header_files = XNEWVEC (int, 10);
 }
 
 /* Add header file number I for this object file
@@ -405,9 +405,7 @@ add_new_header_file (char *name, int instance)
   hfile->name = xstrdup (name);
   hfile->instance = instance;
   hfile->length = 10;
-  hfile->vector
-    = (struct type **) xmalloc (10 * sizeof (struct type *));
-  memset (hfile->vector, 0, 10 * sizeof (struct type *));
+  hfile->vector = XCNEWVEC (struct type *, 10);
 
   add_this_object_header_file (i);
 }
@@ -731,7 +729,7 @@ dbx_symfile_finish (struct objfile *objfile)
 static void
 dbx_free_symfile_info (struct objfile *objfile, void *arg)
 {
-  struct dbx_symfile_info *dbx = arg;
+  struct dbx_symfile_info *dbx = (struct dbx_symfile_info *) arg;
 
   if (dbx->header_files != NULL)
     {
@@ -890,8 +888,8 @@ static void
 init_bincl_list (int number, struct objfile *objfile)
 {
   bincls_allocated = number;
-  next_bincl = bincl_list = (struct header_file_location *)
-    xmalloc (bincls_allocated * sizeof (struct header_file_location));
+  next_bincl = bincl_list = XNEWVEC (struct header_file_location,
+				     bincls_allocated);
 }
 
 /* Add a bincl to the list.  */
@@ -944,7 +942,7 @@ free_bincl_list (struct objfile *objfile)
 static void
 do_free_bincl_list_cleanup (void *objfile)
 {
-  free_bincl_list (objfile);
+  free_bincl_list ((struct objfile *) objfile);
 }
 
 static struct cleanup *
@@ -1127,7 +1125,7 @@ find_stab_function_addr (char *namestring, const char *filename,
   if (p == NULL)
     p = namestring;
   n = p - namestring;
-  p = alloca (n + 2);
+  p = (char *) alloca (n + 2);
   strncpy (p, namestring, n);
   p[n] = 0;
 
@@ -1665,7 +1663,7 @@ read_dbx_symtab (struct objfile *objfile)
 	  sym_name = NULL;	/* pacify "gcc -Werror" */
  	  if (psymtab_language == language_cplus)
  	    {
- 	      char *new_name, *name = xmalloc (p - namestring + 1);
+	      char *new_name, *name = (char *) xmalloc (p - namestring + 1);
  	      memcpy (name, namestring, p - namestring);
 
  	      name[p - namestring] = '\0';
@@ -1673,8 +1671,8 @@ read_dbx_symtab (struct objfile *objfile)
  	      if (new_name != NULL)
  		{
  		  sym_len = strlen (new_name);
- 		  sym_name = obstack_copy0 (&objfile->objfile_obstack,
-					    new_name, sym_len);
+		  sym_name = (char *) obstack_copy0 (&objfile->objfile_obstack,
+						     new_name, sym_len);
  		  xfree (new_name);
  		}
               xfree (name);
@@ -1838,7 +1836,7 @@ read_dbx_symtab (struct objfile *objfile)
 	      if (! pst)
 		{
 		  int name_len = p - namestring;
-		  char *name = xmalloc (name_len + 1);
+		  char *name = (char *) xmalloc (name_len + 1);
 
 		  memcpy (name, namestring, name_len);
 		  name[name_len] = '\0';
@@ -1907,7 +1905,7 @@ read_dbx_symtab (struct objfile *objfile)
 	      if (! pst)
 		{
 		  int name_len = p - namestring;
-		  char *name = xmalloc (name_len + 1);
+		  char *name = (char *) xmalloc (name_len + 1);
 
 		  memcpy (name, namestring, name_len);
 		  name[name_len] = '\0';
@@ -2170,8 +2168,8 @@ start_psymtab (struct objfile *objfile, char *filename, CORE_ADDR textlow,
     start_psymtab_common (objfile, filename, textlow,
 			  global_syms, static_syms);
 
-  result->read_symtab_private = obstack_alloc (&objfile->objfile_obstack,
-					       sizeof (struct symloc));
+  result->read_symtab_private =
+    XOBNEW (&objfile->objfile_obstack, struct symloc);
   LDSYMOFF (result) = ldsymoff;
   result->read_symtab = dbx_read_symtab;
   SYMBOL_SIZE (result) = symbol_size;
@@ -2231,7 +2229,7 @@ dbx_end_psymtab (struct objfile *objfile, struct partial_symtab *pst,
       if (p == NULL)
 	p = last_function_name;
       n = p - last_function_name;
-      p = alloca (n + 2);
+      p = (char *) alloca (n + 2);
       strncpy (p, last_function_name, n);
       p[n] = 0;
 
@@ -2288,9 +2286,9 @@ dbx_end_psymtab (struct objfile *objfile, struct partial_symtab *pst,
   pst->number_of_dependencies = number_dependencies;
   if (number_dependencies)
     {
-      pst->dependencies = (struct partial_symtab **)
-	obstack_alloc (&objfile->objfile_obstack,
-		       number_dependencies * sizeof (struct partial_symtab *));
+      pst->dependencies = XOBNEWVEC (&objfile->objfile_obstack,
+				     struct partial_symtab *,
+				     number_dependencies);
       memcpy (pst->dependencies, dependency_list,
 	      number_dependencies * sizeof (struct partial_symtab *));
     }
@@ -2303,7 +2301,7 @@ dbx_end_psymtab (struct objfile *objfile, struct partial_symtab *pst,
 	allocate_psymtab (include_list[i], objfile);
 
       subpst->read_symtab_private =
-	obstack_alloc (&objfile->objfile_obstack, sizeof (struct symloc));
+	XOBNEW (&objfile->objfile_obstack, struct symloc);
       LDSYMOFF (subpst) =
 	LDSYMLEN (subpst) =
 	subpst->textlow =
@@ -2311,9 +2309,8 @@ dbx_end_psymtab (struct objfile *objfile, struct partial_symtab *pst,
 
       /* We could save slight bits of space by only making one of these,
          shared by the entire set of include files.  FIXME-someday.  */
-      subpst->dependencies = (struct partial_symtab **)
-	obstack_alloc (&objfile->objfile_obstack,
-		       sizeof (struct partial_symtab *));
+      subpst->dependencies =
+	XOBNEW (&objfile->objfile_obstack, struct partial_symtab *);
       subpst->dependencies[0] = pst;
       subpst->number_of_dependencies = 1;
 
@@ -2344,7 +2341,7 @@ dbx_end_psymtab (struct objfile *objfile, struct partial_symtab *pst,
       discard_psymtab (objfile, pst);
 
       /* Indicate that psymtab was thrown away.  */
-      pst = (struct partial_symtab *) NULL;
+      pst = NULL;
     }
   return pst;
 }
@@ -2406,8 +2403,6 @@ dbx_psymtab_to_symtab_1 (struct objfile *objfile, struct partial_symtab *pst)
 static void
 dbx_read_symtab (struct partial_symtab *self, struct objfile *objfile)
 {
-  bfd *sym_bfd;
-
   if (self->readin)
     {
       fprintf_unfiltered (gdb_stderr, "Psymtab for %s already read in.  "
@@ -2427,8 +2422,6 @@ dbx_read_symtab (struct partial_symtab *self, struct objfile *objfile)
 	  printf_filtered ("Reading in symbols for %s...", self->filename);
 	  gdb_flush (gdb_stdout);
 	}
-
-      sym_bfd = objfile->obfd;
 
       next_symbol_text_func = dbx_next_symbol_text;
 
@@ -2649,7 +2642,7 @@ cp_set_block_scope (const struct symbol *symbol,
       unsigned int prefix_len = cp_entire_prefix_len (name);
 
       block_set_scope (block,
-		       obstack_copy0 (obstack, name, prefix_len),
+		       (const char *) obstack_copy0 (obstack, name, prefix_len),
 		       obstack);
     }
 }
@@ -2697,10 +2690,6 @@ process_one_symbol (int type, int desc, CORE_ADDR valu, char *name,
   /* If this is nonzero, we've seen a non-gcc N_OPT symbol for this
      source file.  Used to detect the SunPRO solaris compiler.  */
   static int n_opt_found;
-
-  /* The stab type used for the definition of the last function.
-     N_STSYM or N_GSYM for SunOS4 acc; N_FUN for other compilers.  */
-  static int function_stab_type = 0;
 
   if (!block_address_function_relative)
     {
@@ -3106,8 +3095,6 @@ process_one_symbol (int type, int desc, CORE_ADDR valu, char *name,
 	    {
 	    case 'f':
 	    case 'F':
-	      function_stab_type = type;
-
 	      /* Deal with the SunPRO 3.0 compiler which omits the
 	         address from N_FUN symbols.  */
 	      if (type == N_FUN
@@ -3276,12 +3263,7 @@ coffstab_build_psymtabs (struct objfile *objfile,
   int val;
   bfd *sym_bfd = objfile->obfd;
   char *name = bfd_get_filename (sym_bfd);
-  struct dbx_symfile_info *info;
   unsigned int stabsize;
-
-  /* There is already a dbx_symfile_info allocated by our caller.
-     It might even contain some info from the coff symtab to help us.  */
-  info = DBX_SYMFILE_INFO (objfile);
 
   DBX_TEXT_ADDR (objfile) = textaddr;
   DBX_TEXT_SIZE (objfile) = textsize;
@@ -3365,12 +3347,7 @@ elfstab_build_psymtabs (struct objfile *objfile, asection *stabsect,
   int val;
   bfd *sym_bfd = objfile->obfd;
   char *name = bfd_get_filename (sym_bfd);
-  struct dbx_symfile_info *info;
   struct cleanup *back_to = make_cleanup (null_cleanup, NULL);
-
-  /* There is already a dbx_symfile_info allocated by our caller.
-     It might even contain some info from the ELF symtab to help us.  */
-  info = DBX_SYMFILE_INFO (objfile);
 
   /* Find the first and last text address.  dbx_symfile_read seems to
      want this.  */

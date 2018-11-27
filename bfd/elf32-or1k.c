@@ -1,5 +1,5 @@
 /* Or1k-specific support for 32-bit ELF.
-   Copyright (C) 2001-2015 Free Software Foundation, Inc.
+   Copyright (C) 2001-2016 Free Software Foundation, Inc.
    Contributed for OR32 by Johan Rydberg, jrydberg@opencores.org
 
    PIC parts added by Stefan Kristiansson, stefan.kristiansson@saunalahti.fi,
@@ -199,7 +199,7 @@ static reloc_howto_type or1k_elf_howto_table[] =
          FALSE,                 /* partial_inplace */
          0,                     /* src_mask */
          0xffffffff,            /* dst_mask */
-         FALSE),                /* pcrel_offset */
+         TRUE),                 /* pcrel_offset */
 
   HOWTO (R_OR1K_16_PCREL,
          0,                     /* rightshift */
@@ -213,7 +213,7 @@ static reloc_howto_type or1k_elf_howto_table[] =
          FALSE,                 /* partial_inplace */
          0,                     /* src_mask */
          0xffff,                /* dst_mask */
-         FALSE),                /* pcrel_offset */
+         TRUE),                 /* pcrel_offset */
 
   HOWTO (R_OR1K_8_PCREL,
          0,                     /* rightshift */
@@ -227,7 +227,7 @@ static reloc_howto_type or1k_elf_howto_table[] =
          FALSE,                 /* partial_inplace */
          0,                     /* src_mask */
          0xff,                  /* dst_mask */
-         FALSE),                /* pcrel_offset */
+         TRUE),                 /* pcrel_offset */
 
    HOWTO (R_OR1K_GOTPC_HI16,    /* Type.  */
          16,                    /* Rightshift.  */
@@ -998,7 +998,10 @@ or1k_elf_relocate_section (bfd *output_bfd,
         case R_OR1K_GOTOFF_HI16:
           /* Relocation is offset from GOT.  */
           BFD_ASSERT (sgot != NULL);
-          relocation -= sgot->output_section->vma;
+	  relocation
+	    -= (htab->root.hgot->root.u.def.value
+		+ htab->root.hgot->root.u.def.section->output_offset
+		+ htab->root.hgot->root.u.def.section->output_section->vma);
           break;
 
         case R_OR1K_INSN_REL_26:
@@ -1249,13 +1252,13 @@ or1k_elf_relocate_section (bfd *output_bfd,
           switch (r)
             {
             case bfd_reloc_overflow:
-              r = info->callbacks->reloc_overflow
+	      (*info->callbacks->reloc_overflow)
                 (info, (h ? &h->root : NULL), name, howto->name,
                  (bfd_vma) 0, input_bfd, input_section, rel->r_offset);
               break;
 
             case bfd_reloc_undefined:
-              r = info->callbacks->undefined_symbol
+	      (*info->callbacks->undefined_symbol)
                 (info, name, input_bfd, input_section, rel->r_offset, TRUE);
               break;
 
@@ -1277,11 +1280,8 @@ or1k_elf_relocate_section (bfd *output_bfd,
             }
 
           if (msg)
-            r = info->callbacks->warning
-              (info, msg, name, input_bfd, input_section, rel->r_offset);
-
-          if (!r)
-            return FALSE;
+	    (*info->callbacks->warning) (info, msg, name, input_bfd,
+					 input_section, rel->r_offset);
         }
     }
 
@@ -1759,20 +1759,17 @@ or1k_elf_finish_dynamic_sections (bfd *output_bfd,
               continue;
 
             case DT_PLTGOT:
-              s = htab->sgot->output_section;
-              BFD_ASSERT (s != NULL);
-              dyn.d_un.d_ptr = s->vma;
+              s = htab->sgotplt;
+              dyn.d_un.d_ptr = s->output_section->vma + s->output_offset;
               break;
 
             case DT_JMPREL:
-              s = htab->srelplt->output_section;
-              BFD_ASSERT (s != NULL);
-              dyn.d_un.d_ptr = s->vma;
+              s = htab->srelplt;
+              dyn.d_un.d_ptr = s->output_section->vma + s->output_offset;
               break;
 
             case DT_PLTRELSZ:
-              s = htab->srelplt->output_section;
-              BFD_ASSERT (s != NULL);
+              s = htab->srelplt;
               dyn.d_un.d_val = s->size;
               break;
 
@@ -1788,19 +1785,8 @@ or1k_elf_finish_dynamic_sections (bfd *output_bfd,
                  about changing the DT_RELA entry.  */
               if (htab->srelplt != NULL)
                 {
-                  /* FIXME: this calculation sometimes produces
-                     wrong result, the problem is that the dyn.d_un.d_val
-                     is not always correct, needs investigation why
-                     that happens. In the meantime, reading the
-                     ".rela.dyn" section by name seems to yield
-                     correct result.
-
-                  s = htab->srelplt->output_section;
+                  s = htab->srelplt;
                   dyn.d_un.d_val -= s->size;
-                  */
-
-                  s = bfd_get_section_by_name (output_bfd, ".rela.dyn");
-                  dyn.d_un.d_val = s ? s->size : 0;
                 }
               break;
             }
@@ -2447,7 +2433,7 @@ or1k_elf_size_dynamic_sections (bfd *output_bfd ATTRIBUTE_UNUSED,
   if (htab->root.dynamic_sections_created)
     {
       /* Set the contents of the .interp section to the interpreter.  */
-      if (bfd_link_executable (info))
+      if (bfd_link_executable (info) && !info->nointerp)
         {
           s = bfd_get_section_by_name (dynobj, ".interp");
           BFD_ASSERT (s != NULL);

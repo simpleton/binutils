@@ -1,6 +1,6 @@
 /* Floating point routines for GDB, the GNU debugger.
 
-   Copyright (C) 1986-2015 Free Software Foundation, Inc.
+   Copyright (C) 1986-2016 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -183,7 +183,7 @@ convert_floatformat_to_doublest (const struct floatformat *fmt,
   /* For non-numbers, reuse libiberty's logic to find the correct
      format.  We do not lose any precision in this case by passing
      through a double.  */
-  kind = floatformat_classify (fmt, from);
+  kind = floatformat_classify (fmt, (const bfd_byte *) from);
   if (kind == float_infinite || kind == float_nan)
     {
       double dto;
@@ -686,37 +686,55 @@ floatformat_mantissa (const struct floatformat *fmt,
    If the host and target formats agree, we just copy the raw data
    into the appropriate type of variable and return, letting the host
    increase precision as necessary.  Otherwise, we call the conversion
-   routine and let it do the dirty work.  */
+   routine and let it do the dirty work.  Note that even if the target
+   and host floating-point formats match, the length of the types
+   might still be different, so the conversion routines must make sure
+   to not overrun any buffers.  For example, on x86, long double is
+   the 80-bit extended precision type on both 32-bit and 64-bit ABIs,
+   but by default it is stored as 12 bytes on 32-bit, and 16 bytes on
+   64-bit, for alignment reasons.  See comment in store_typed_floating
+   for a discussion about zeroing out remaining bytes in the target
+   buffer.  */
 
 static const struct floatformat *host_float_format = GDB_HOST_FLOAT_FORMAT;
 static const struct floatformat *host_double_format = GDB_HOST_DOUBLE_FORMAT;
 static const struct floatformat *host_long_double_format
   = GDB_HOST_LONG_DOUBLE_FORMAT;
 
+/* See doublest.h.  */
+
+size_t
+floatformat_totalsize_bytes (const struct floatformat *fmt)
+{
+  return ((fmt->totalsize + FLOATFORMAT_CHAR_BIT - 1)
+	  / FLOATFORMAT_CHAR_BIT);
+}
+
 void
 floatformat_to_doublest (const struct floatformat *fmt,
 			 const void *in, DOUBLEST *out)
 {
   gdb_assert (fmt != NULL);
+
   if (fmt == host_float_format)
     {
-      float val;
+      float val = 0;
 
-      memcpy (&val, in, sizeof (val));
+      memcpy (&val, in, floatformat_totalsize_bytes (fmt));
       *out = val;
     }
   else if (fmt == host_double_format)
     {
-      double val;
+      double val = 0;
 
-      memcpy (&val, in, sizeof (val));
+      memcpy (&val, in, floatformat_totalsize_bytes (fmt));
       *out = val;
     }
   else if (fmt == host_long_double_format)
     {
-      long double val;
+      long double val = 0;
 
-      memcpy (&val, in, sizeof (val));
+      memcpy (&val, in, floatformat_totalsize_bytes (fmt));
       *out = val;
     }
   else
@@ -728,86 +746,44 @@ floatformat_from_doublest (const struct floatformat *fmt,
 			   const DOUBLEST *in, void *out)
 {
   gdb_assert (fmt != NULL);
+
   if (fmt == host_float_format)
     {
       float val = *in;
 
-      memcpy (out, &val, sizeof (val));
+      memcpy (out, &val, floatformat_totalsize_bytes (fmt));
     }
   else if (fmt == host_double_format)
     {
       double val = *in;
 
-      memcpy (out, &val, sizeof (val));
+      memcpy (out, &val, floatformat_totalsize_bytes (fmt));
     }
   else if (fmt == host_long_double_format)
     {
       long double val = *in;
 
-      memcpy (out, &val, sizeof (val));
+      memcpy (out, &val, floatformat_totalsize_bytes (fmt));
     }
   else
     convert_doublest_to_floatformat (fmt, in, out);
 }
 
 
-/* Return a floating-point format for a floating-point variable of
-   length LEN.  If no suitable floating-point format is found, an
-   error is thrown.
-
-   We need this functionality since information about the
-   floating-point format of a type is not always available to GDB; the
-   debug information typically only tells us the size of a
-   floating-point type.
-
-   FIXME: kettenis/2001-10-28: In many places, particularly in
-   target-dependent code, the format of floating-point types is known,
-   but not passed on by GDB.  This should be fixed.  */
-
-static const struct floatformat *
-floatformat_from_length (struct gdbarch *gdbarch, int len)
-{
-  const struct floatformat *format;
-
-  if (len * TARGET_CHAR_BIT == gdbarch_half_bit (gdbarch))
-    format = gdbarch_half_format (gdbarch)
-	       [gdbarch_byte_order (gdbarch)];
-  else if (len * TARGET_CHAR_BIT == gdbarch_float_bit (gdbarch))
-    format = gdbarch_float_format (gdbarch)
-	       [gdbarch_byte_order (gdbarch)];
-  else if (len * TARGET_CHAR_BIT == gdbarch_double_bit (gdbarch))
-    format = gdbarch_double_format (gdbarch)
-	       [gdbarch_byte_order (gdbarch)];
-  else if (len * TARGET_CHAR_BIT == gdbarch_long_double_bit (gdbarch))
-    format = gdbarch_long_double_format (gdbarch)
-	       [gdbarch_byte_order (gdbarch)];
-  /* On i386 the 'long double' type takes 96 bits,
-     while the real number of used bits is only 80,
-     both in processor and in memory.
-     The code below accepts the real bit size.  */ 
-  else if ((gdbarch_long_double_format (gdbarch) != NULL)
-	   && (len * TARGET_CHAR_BIT
-               == gdbarch_long_double_format (gdbarch)[0]->totalsize))
-    format = gdbarch_long_double_format (gdbarch)
-	       [gdbarch_byte_order (gdbarch)];
-  else
-    format = NULL;
-  if (format == NULL)
-    error (_("Unrecognized %d-bit floating-point type."),
-	   len * TARGET_CHAR_BIT);
-  return format;
-}
+/* Return the floating-point format for a floating-point variable of
+   type TYPE.  */
 
 const struct floatformat *
 floatformat_from_type (const struct type *type)
 {
   struct gdbarch *gdbarch = get_type_arch (type);
+  const struct floatformat *fmt;
 
   gdb_assert (TYPE_CODE (type) == TYPE_CODE_FLT);
-  if (TYPE_FLOATFORMAT (type) != NULL)
-    return TYPE_FLOATFORMAT (type)[gdbarch_byte_order (gdbarch)];
-  else
-    return floatformat_from_length (gdbarch, TYPE_LENGTH (type));
+  gdb_assert (TYPE_FLOATFORMAT (type));
+  fmt = TYPE_FLOATFORMAT (type)[gdbarch_byte_order (gdbarch)];
+  gdb_assert (TYPE_LENGTH (type) >= floatformat_totalsize_bytes (fmt));
+  return fmt;
 }
 
 /* Extract a floating-point number of type TYPE from a target-order

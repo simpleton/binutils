@@ -1,5 +1,5 @@
 /* Alpha specific support for 64-bit ELF
-   Copyright (C) 1996-2015 Free Software Foundation, Inc.
+   Copyright (C) 1996-2016 Free Software Foundation, Inc.
    Contributed by Richard Henderson <rth@tamu.edu>.
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -1757,6 +1757,18 @@ elf64_alpha_want_plt (struct alpha_elf_link_hash_entry *ah)
 	  && (ah->flags & ~ALPHA_ELF_LINK_HASH_LU_PLT) == 0);
 }
 
+/* Whether to sort relocs output by ld -r or ld --emit-relocs, by r_offset.
+   Don't do so for code sections.  We want to keep ordering of LITERAL/LITUSE
+   as is.  On the other hand, elf-eh-frame.c processing requires .eh_frame
+   relocs to be sorted.  */
+
+static bfd_boolean
+elf64_alpha_sort_relocs_p (asection *sec)
+{
+  return (sec->flags & SEC_CODE) == 0;
+}
+
+
 /* Handle dynamic relocations when doing an Alpha ELF link.  */
 
 static bfd_boolean
@@ -2206,7 +2218,7 @@ elf64_alpha_copy_indirect_symbol (struct bfd_link_info *info,
 		&& gi->reloc_type == gs->reloc_type
 		&& gi->addend == gs->addend)
 	      {
-		gi->use_count += gs->use_count;
+		gs->use_count += gi->use_count;
 	        goto got_found;
 	      }
 	  gi->next = hs->got_entries;
@@ -2878,7 +2890,7 @@ elf64_alpha_size_dynamic_sections (bfd *output_bfd ATTRIBUTE_UNUSED,
   if (elf_hash_table (info)->dynamic_sections_created)
     {
       /* Set the contents of the .interp section to the interpreter.  */
-      if (bfd_link_executable (info))
+      if (bfd_link_executable (info) && !info->nointerp)
 	{
 	  s = bfd_get_linker_section (dynobj, ".interp");
 	  BFD_ASSERT (s != NULL);
@@ -4813,11 +4825,9 @@ elf64_alpha_relocate_section (bfd *output_bfd, struct bfd_link_info *info,
 		if (*name == '\0')
 		  name = bfd_section_name (input_bfd, sec);
 	      }
-	    if (! ((*info->callbacks->reloc_overflow)
-		   (info, (h ? &h->root.root : NULL), name, howto->name,
-		    (bfd_vma) 0, input_bfd, input_section,
-		    rel->r_offset)))
-	      ret_val = FALSE;
+	    (*info->callbacks->reloc_overflow)
+	      (info, (h ? &h->root.root : NULL), name, howto->name,
+	       (bfd_vma) 0, input_bfd, input_section, rel->r_offset);
 	  }
 	  break;
 
@@ -4999,7 +5009,7 @@ elf64_alpha_finish_dynamic_sections (bfd *output_bfd,
       bfd_vma plt_vma, gotplt_vma;
 
       splt = bfd_get_linker_section (dynobj, ".plt");
-      srelaplt = bfd_get_linker_section (output_bfd, ".rela.plt");
+      srelaplt = bfd_get_linker_section (dynobj, ".rela.plt");
       BFD_ASSERT (splt != NULL && sdyn != NULL);
 
       plt_vma = splt->output_section->vma + splt->output_offset;
@@ -5031,7 +5041,8 @@ elf64_alpha_finish_dynamic_sections (bfd *output_bfd,
 	      dyn.d_un.d_val = srelaplt ? srelaplt->size : 0;
 	      break;
 	    case DT_JMPREL:
-	      dyn.d_un.d_ptr = srelaplt ? srelaplt->vma : 0;
+	      dyn.d_un.d_ptr = srelaplt ? (srelaplt->output_section->vma
+					   + srelaplt->output_offset) : 0;
 	      break;
 
 	    case DT_RELASZ:
@@ -5525,6 +5536,8 @@ static const struct elf_size_info alpha_elf_size_info =
   elf64_alpha_add_symbol_hook
 #define elf_backend_relocs_compatible \
   _bfd_elf_relocs_compatible
+#define elf_backend_sort_relocs_p \
+  elf64_alpha_sort_relocs_p
 #define elf_backend_check_relocs \
   elf64_alpha_check_relocs
 #define elf_backend_create_dynamic_sections \

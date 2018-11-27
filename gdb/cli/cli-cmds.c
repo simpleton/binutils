@@ -1,6 +1,6 @@
 /* GDB CLI commands.
 
-   Copyright (C) 2000-2015 Free Software Foundation, Inc.
+   Copyright (C) 2000-2016 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -277,7 +277,7 @@ complete_command (char *arg, int from_tty)
       point--;
     }
 
-  arg_prefix = alloca (point - arg + 1);
+  arg_prefix = (char *) alloca (point - arg + 1);
   memcpy (arg_prefix, arg, point - arg);
   arg_prefix[point - arg] = 0;
 
@@ -538,10 +538,16 @@ find_and_open_script (const char *script_file, int search_path,
   return 1;
 }
 
-/* Load script FILE, which has already been opened as STREAM.  */
+/* Load script FILE, which has already been opened as STREAM.
+   FILE_TO_OPEN is the form of FILE to use if one needs to open the file.
+   This is provided as FILE may have been found via the source search path.
+   An important thing to note here is that FILE may be a symlink to a file
+   with a different or non-existing suffix, and thus one cannot infer the
+   extension language from FILE_TO_OPEN.  */
 
 static void
-source_script_from_stream (FILE *stream, const char *file)
+source_script_from_stream (FILE *stream, const char *file,
+			   const char *file_to_open)
 {
   if (script_ext_mode != script_ext_off)
     {
@@ -556,7 +562,7 @@ source_script_from_stream (FILE *stream, const char *file)
 		= ext_lang_script_sourcer (extlang);
 
 	      gdb_assert (sourcer != NULL);
-	      sourcer (extlang, stream, file);
+	      sourcer (extlang, stream, file_to_open);
 	      return;
 	    }
 	  else if (script_ext_mode == script_ext_soft)
@@ -609,7 +615,7 @@ source_script_with_search (const char *file, int from_tty, int search_path)
      anyway so that error messages show the actual file used.  But only do
      this if we (may have) used search_path, as printing the full path in
      errors for the non-search case can be more noise than signal.  */
-  source_script_from_stream (stream, search_path ? full_path : file);
+  source_script_from_stream (stream, file, search_path ? full_path : file);
   do_cleanups (old_cleanups);
 }
 
@@ -636,7 +642,7 @@ source_command (char *args, int from_tty)
 {
   struct cleanup *old_cleanups;
   char *file = args;
-  int *old_source_verbose = xmalloc (sizeof(int));
+  int *old_source_verbose = XNEW (int);
   int search_path = 0;
 
   *old_source_verbose = source_verbose;
@@ -812,7 +818,7 @@ edit_command (char *arg, int from_tty)
       arg1 = arg;
       location = string_to_event_location (&arg1, current_language);
       cleanup = make_cleanup_delete_event_location (location);
-      sals = decode_line_1 (location, DECODE_LINE_LIST_MODE, 0, 0);
+      sals = decode_line_1 (location, DECODE_LINE_LIST_MODE, NULL, NULL, 0);
 
       filter_sals (&sals);
       if (! sals.nelts)
@@ -901,7 +907,7 @@ list_command (char *arg, int from_tty)
   cleanup = make_cleanup (null_cleanup, NULL);
 
   /* Pull in the current default source line if necessary.  */
-  if (arg == 0 || arg[0] == '+' || arg[0] == '-')
+  if (arg == NULL || ((arg[0] == '+' || arg[0] == '-') && arg[1] == '\0'))
     {
       set_default_source_symtab_and_line ();
       cursal = get_current_source_symtab_and_line ();
@@ -924,27 +930,26 @@ list_command (char *arg, int from_tty)
 
 	  print_source_lines (cursal.symtab, first,
 			      first + get_lines_to_list (), 0);
-	  return;
 	}
-    }
 
-  /* "l" or "l +" lists next ten lines.  */
+      /* "l" or "l +" lists next ten lines.  */
+      else if (arg == NULL || arg[0] == '+')
+	print_source_lines (cursal.symtab, cursal.line,
+			    cursal.line + get_lines_to_list (), 0);
 
-  if (arg == 0 || strcmp (arg, "+") == 0)
-    {
-      print_source_lines (cursal.symtab, cursal.line,
-			  cursal.line + get_lines_to_list (), 0);
-      return;
-    }
+      /* "l -" lists previous ten lines, the ones before the ten just
+	 listed.  */
+      else if (arg[0] == '-')
+	{
+	  if (get_first_line_listed () == 1)
+	    error (_("Already at the start of %s."),
+		   symtab_to_filename_for_display (cursal.symtab));
+	  print_source_lines (cursal.symtab,
+			      max (get_first_line_listed ()
+				   - get_lines_to_list (), 1),
+			      get_first_line_listed (), 0);
+	}
 
-  /* "l -" lists previous ten lines, the ones before the ten just
-     listed.  */
-  if (strcmp (arg, "-") == 0)
-    {
-      print_source_lines (cursal.symtab,
-			  max (get_first_line_listed () 
-			       - get_lines_to_list (), 1),
-			  get_first_line_listed (), 0);
       return;
     }
 
@@ -966,7 +971,7 @@ list_command (char *arg, int from_tty)
 
       location = string_to_event_location (&arg1, current_language);
       make_cleanup_delete_event_location (location);
-      sals = decode_line_1 (location, DECODE_LINE_LIST_MODE, 0, 0);
+      sals = decode_line_1 (location, DECODE_LINE_LIST_MODE, NULL, NULL, 0);
 
       filter_sals (&sals);
       if (!sals.nelts)
@@ -1010,10 +1015,10 @@ list_command (char *arg, int from_tty)
 	  make_cleanup_delete_event_location (location);
 	  if (dummy_beg)
 	    sals_end = decode_line_1 (location,
-				      DECODE_LINE_LIST_MODE, 0, 0);
+				      DECODE_LINE_LIST_MODE, NULL, NULL, 0);
 	  else
 	    sals_end = decode_line_1 (location, DECODE_LINE_LIST_MODE,
-				      sal.symtab, sal.line);
+				      NULL, sal.symtab, sal.line);
 
 	  filter_sals (&sals_end);
 	  if (sals_end.nelts == 0)
@@ -1295,7 +1300,7 @@ make_command (char *arg, int from_tty)
     p = "make";
   else
     {
-      p = xmalloc (sizeof ("make ") + strlen (arg));
+      p = (char *) xmalloc (sizeof ("make ") + strlen (arg));
       strcpy (p, "make ");
       strcpy (p + sizeof ("make ") - 1, arg);
     }
@@ -1405,6 +1410,14 @@ valid_command_p (const char *command)
   return *command == '\0';
 }
 
+/* Called when "alias" was incorrectly used.  */
+
+static void
+alias_usage_error (void)
+{
+  error (_("Usage: alias [-a] [--] ALIAS = COMMAND"));
+}
+
 /* Make an alias of an existing command.  */
 
 static void
@@ -1416,10 +1429,9 @@ alias_command (char *args, int from_tty)
   char **alias_argv, **command_argv;
   dyn_string_t alias_dyn_string, command_dyn_string;
   struct cleanup *cleanup;
-  static const char usage[] = N_("Usage: alias [-a] [--] ALIAS = COMMAND");
 
   if (args == NULL || strchr (args, '=') == NULL)
-    error (_(usage));
+    alias_usage_error ();
 
   args2 = xstrdup (args);
   cleanup = make_cleanup (xfree, args2);
@@ -1448,7 +1460,7 @@ alias_command (char *args, int from_tty)
 
   if (alias_argv[0] == NULL || command_argv[0] == NULL
       || *alias_argv[0] == '\0' || *command_argv[0] == '\0')
-    error (_(usage));
+    alias_usage_error ();
 
   for (i = 0; alias_argv[i] != NULL; ++i)
     {
@@ -1554,8 +1566,8 @@ ambiguous_line_spec (struct symtabs_and_lines *sals)
 static int
 compare_symtabs (const void *a, const void *b)
 {
-  const struct symtab_and_line *sala = a;
-  const struct symtab_and_line *salb = b;
+  const struct symtab_and_line *sala = (const struct symtab_and_line *) a;
+  const struct symtab_and_line *salb = (const struct symtab_and_line *) b;
   const char *dira = SYMTAB_DIRNAME (sala->symtab);
   const char *dirb = SYMTAB_DIRNAME (salb->symtab);
   int r;
@@ -1891,8 +1903,12 @@ Lines can be specified in these ways:\n\
   FUNCTION, to list around beginning of that function,\n\
   FILE:FUNCTION, to distinguish among like-named static functions.\n\
   *ADDRESS, to list around the line containing that address.\n\
-With two args if one is empty it stands for ten lines away from \
-the other arg."));
+With two args, if one is empty, it stands for ten lines away from\n\
+the other arg.\n\
+\n\
+By default, when a single location is given, display ten lines.\n\
+This can be changed using \"set listsize\", and the current value\n\
+can be shown using \"show listsize\"."));
 
   add_com_alias ("l", "list", class_files, 1);
 

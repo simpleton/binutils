@@ -1,4 +1,4 @@
-/* Copyright (C) 2009-2015 Free Software Foundation, Inc.
+/* Copyright (C) 2009-2016 Free Software Foundation, Inc.
    Contributed by ARM Ltd.
 
    This file is part of GDB.
@@ -68,6 +68,8 @@
 
 /* Macro for the expected version of the ARMv8-A debug architecture.  */
 #define AARCH64_DEBUG_ARCH_V8 0x6
+#define AARCH64_DEBUG_ARCH_V8_1 0x7
+#define AARCH64_DEBUG_ARCH_V8_2 0x8
 
 /* ptrace expects control registers to be formatted as follows:
 
@@ -181,5 +183,7 @@ void aarch64_show_debug_reg_state (struct aarch64_debug_reg_state *state,
 void aarch64_linux_get_debug_reg_capacity (int tid);
 
 struct aarch64_debug_reg_state *aarch64_get_debug_reg_state (pid_t pid);
+
+int aarch64_linux_region_ok_for_watchpoint (CORE_ADDR addr, int len);
 
 #endif /* AARCH64_LINUX_HW_POINT_H */

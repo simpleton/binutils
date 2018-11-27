@@ -1,6 +1,6 @@
 /* Dynamic architecture support for GDB, the GNU debugger.
 
-   Copyright (C) 1998-2015 Free Software Foundation, Inc.
+   Copyright (C) 1998-2016 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -44,7 +44,7 @@ simple_displaced_step_copy_insn (struct gdbarch *gdbarch,
                                  struct regcache *regs)
 {
   size_t len = gdbarch_max_insn_length (gdbarch);
-  gdb_byte *buf = xmalloc (len);
+  gdb_byte *buf = (gdb_byte *) xmalloc (len);
 
   read_memory (from, buf, len);
   write_memory (to, buf, len);
@@ -130,6 +130,13 @@ int
 generic_stack_frame_destroyed_p (struct gdbarch *gdbarch, CORE_ADDR pc)
 {
   return 0;
+}
+
+int
+default_code_of_frame_writable (struct gdbarch *gdbarch,
+				struct frame_info *frame)
+{
+  return 1;
 }
 
 /* Helper functions for gdbarch_inner_than */
@@ -234,6 +241,34 @@ legacy_virtual_frame_pointer (struct gdbarch *gdbarch,
   *frame_offset = 0;
 }
 
+/* Return a floating-point format for a floating-point variable of
+   length LEN in bits.  If non-NULL, NAME is the name of its type.
+   If no suitable type is found, return NULL.  */
+
+const struct floatformat **
+default_floatformat_for_type (struct gdbarch *gdbarch,
+			      const char *name, int len)
+{
+  const struct floatformat **format = NULL;
+
+  if (len == gdbarch_half_bit (gdbarch))
+    format = gdbarch_half_format (gdbarch);
+  else if (len == gdbarch_float_bit (gdbarch))
+    format = gdbarch_float_format (gdbarch);
+  else if (len == gdbarch_double_bit (gdbarch))
+    format = gdbarch_double_format (gdbarch);
+  else if (len == gdbarch_long_double_bit (gdbarch))
+    format = gdbarch_long_double_format (gdbarch);
+  /* On i386 the 'long double' type takes 96 bits,
+     while the real number of used bits is only 80,
+     both in processor and in memory.
+     The code below accepts the real bit size.  */
+  else if (gdbarch_long_double_format (gdbarch) != NULL
+	   && len == gdbarch_long_double_format (gdbarch)[0]->totalsize)
+    format = gdbarch_long_double_format (gdbarch);
+
+  return format;
+}
 
 int
 generic_convert_register_p (struct gdbarch *gdbarch, int regnum,
@@ -684,7 +719,7 @@ initialize_current_architecture (void)
     /* Append ``auto''.  */
     int nr;
     for (nr = 0; arches[nr] != NULL; nr++);
-    arches = xrealloc (arches, sizeof (char*) * (nr + 2));
+    arches = XRESIZEVEC (const char *, arches, nr + 2);
     arches[nr + 0] = "auto";
     arches[nr + 1] = NULL;
     add_setshow_enum_cmd ("architecture", class_support,
@@ -850,10 +885,9 @@ default_skip_permanent_breakpoint (struct regcache *regcache)
 {
   struct gdbarch *gdbarch = get_regcache_arch (regcache);
   CORE_ADDR current_pc = regcache_read_pc (regcache);
-  const gdb_byte *bp_insn;
   int bp_len;
 
-  bp_insn = gdbarch_breakpoint_from_pc (gdbarch, &current_pc, &bp_len);
+  gdbarch_breakpoint_from_pc (gdbarch, &current_pc, &bp_len);
   current_pc += bp_len;
   regcache_write_pc (regcache, current_pc);
 }
@@ -895,6 +929,29 @@ int
 default_addressable_memory_unit_size (struct gdbarch *gdbarch)
 {
   return 1;
+}
+
+void
+default_guess_tracepoint_registers (struct gdbarch *gdbarch,
+				    struct regcache *regcache,
+				    CORE_ADDR addr)
+{
+  int pc_regno = gdbarch_pc_regnum (gdbarch);
+  gdb_byte *regs;
+
+  /* This guessing code below only works if the PC register isn't
+     a pseudo-register.  The value of a pseudo-register isn't stored
+     in the (non-readonly) regcache -- instead it's recomputed
+     (probably from some other cached raw register) whenever the
+     register is read.  In this case, a custom method implementation
+     should be used by the architecture.  */
+  if (pc_regno < 0 || pc_regno >= gdbarch_num_regs (gdbarch))
+    return;
+
+  regs = (gdb_byte *) alloca (register_size (gdbarch, pc_regno));
+  store_unsigned_integer (regs, register_size (gdbarch, pc_regno),
+			  gdbarch_byte_order (gdbarch), addr);
+  regcache_raw_supply (regcache, pc_regno, regs);
 }
 
 /* -Wmissing-prototypes */

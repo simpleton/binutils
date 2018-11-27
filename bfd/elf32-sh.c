@@ -1,5 +1,5 @@
 /* Renesas / SuperH SH specific support for 32-bit ELF
-   Copyright (C) 1996-2015 Free Software Foundation, Inc.
+   Copyright (C) 1996-2016 Free Software Foundation, Inc.
    Contributed by Ian Lance Taylor, Cygnus Support.
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -3349,7 +3349,7 @@ sh_elf_size_dynamic_sections (bfd *output_bfd ATTRIBUTE_UNUSED,
   if (htab->root.dynamic_sections_created)
     {
       /* Set the contents of the .interp section to the interpreter.  */
-      if (bfd_link_executable (info))
+      if (bfd_link_executable (info) && !info->nointerp)
 	{
 	  s = bfd_get_linker_section (dynobj, ".interp");
 	  BFD_ASSERT (s != NULL);
@@ -3608,8 +3608,7 @@ sh_elf_size_dynamic_sections (bfd *output_bfd ATTRIBUTE_UNUSED,
 	      || ! add_dynamic_entry (DT_JMPREL, 0))
 	    return FALSE;
 	}
-      else if ((elf_elfheader (output_bfd)->e_flags & EF_SH_FDPIC)
-	       && htab->sgot->size != 0)
+      else if ((elf_elfheader (output_bfd)->e_flags & EF_SH_FDPIC))
 	{
 	  if (! add_dynamic_entry (DT_PLTGOT, 0))
 	    return FALSE;
@@ -3953,10 +3952,10 @@ sh_elf_relocate_section (bfd *output_bfd, struct bfd_link_info *info,
 	     datalabel processing here.  Make sure this does not change
 	     without notice.  */
 	  if ((sym->st_other & STO_SH5_ISA32) != 0)
-	    ((*info->callbacks->reloc_dangerous)
-	     (info,
-	      _("Unexpected STO_SH5_ISA32 on local symbol is not handled"),
-	      input_bfd, input_section, rel->r_offset));
+	    (*info->callbacks->reloc_dangerous)
+	      (info,
+	       _("Unexpected STO_SH5_ISA32 on local symbol is not handled"),
+	       input_bfd, input_section, rel->r_offset);
 
 	  if (sec != NULL && discarded_section (sec))
 	    /* Handled below.  */
@@ -4142,14 +4141,11 @@ sh_elf_relocate_section (bfd *output_bfd, struct bfd_link_info *info,
 		   && ELF_ST_VISIBILITY (h->other) == STV_DEFAULT)
 	    ;
 	  else if (!bfd_link_relocatable (info))
-	    {
-	      if (! info->callbacks->undefined_symbol
-		  (info, h->root.root.string, input_bfd,
-		   input_section, rel->r_offset,
-		   (info->unresolved_syms_in_objects == RM_GENERATE_ERROR
-		    || ELF_ST_VISIBILITY (h->other))))
-		return FALSE;
-	    }
+	    (*info->callbacks->undefined_symbol)
+	      (info, h->root.root.string, input_bfd,
+	       input_section, rel->r_offset,
+	       (info->unresolved_syms_in_objects == RM_GENERATE_ERROR
+		|| ELF_ST_VISIBILITY (h->other)));
 	}
 
       if (sec != NULL && discarded_section (sec))
@@ -5496,7 +5492,7 @@ sh_elf_relocate_section (bfd *output_bfd, struct bfd_link_info *info,
 		   input_bfd, input_section, rel->r_offset, symname);
 	    }
 
-	  elf_elfheader (output_bfd)->e_flags &= ~EF_SH_PIC;
+	  elf_elfheader (output_bfd)->e_flags |= EF_SH_PIC;
 	}
 
       if (r != bfd_reloc_ok)
@@ -5521,11 +5517,9 @@ sh_elf_relocate_section (bfd *output_bfd, struct bfd_link_info *info,
 		    if (*name == '\0')
 		      name = bfd_section_name (input_bfd, sec);
 		  }
-		if (! ((*info->callbacks->reloc_overflow)
-		       (info, (h ? &h->root : NULL), name, howto->name,
-			(bfd_vma) 0, input_bfd, input_section,
-			rel->r_offset)))
-		  return FALSE;
+		(*info->callbacks->reloc_overflow)
+		  (info, (h ? &h->root : NULL), name, howto->name,
+		   (bfd_vma) 0, input_bfd, input_section, rel->r_offset);
 	      }
 	      break;
 	    }
@@ -5686,220 +5680,6 @@ sh_elf_gc_mark_hook (asection *sec,
       }
 
   return _bfd_elf_gc_mark_hook (sec, info, rel, h, sym);
-}
-
-/* Update the got entry reference counts for the section being removed.  */
-
-static bfd_boolean
-sh_elf_gc_sweep_hook (bfd *abfd, struct bfd_link_info *info,
-		      asection *sec, const Elf_Internal_Rela *relocs)
-{
-  Elf_Internal_Shdr *symtab_hdr;
-  struct elf_link_hash_entry **sym_hashes;
-  bfd_signed_vma *local_got_refcounts;
-  union gotref *local_funcdesc;
-  const Elf_Internal_Rela *rel, *relend;
-
-  if (bfd_link_relocatable (info))
-    return TRUE;
-
-  elf_section_data (sec)->local_dynrel = NULL;
-
-  symtab_hdr = &elf_symtab_hdr (abfd);
-  sym_hashes = elf_sym_hashes (abfd);
-  local_got_refcounts = elf_local_got_refcounts (abfd);
-  local_funcdesc = sh_elf_local_funcdesc (abfd);
-
-  relend = relocs + sec->reloc_count;
-  for (rel = relocs; rel < relend; rel++)
-    {
-      unsigned long r_symndx;
-      unsigned int r_type;
-      struct elf_link_hash_entry *h = NULL;
-#ifdef INCLUDE_SHMEDIA
-      int seen_stt_datalabel = 0;
-#endif
-
-      r_symndx = ELF32_R_SYM (rel->r_info);
-      if (r_symndx >= symtab_hdr->sh_info)
-	{
-	  struct elf_sh_link_hash_entry *eh;
-	  struct elf_sh_dyn_relocs **pp;
-	  struct elf_sh_dyn_relocs *p;
-
-	  h = sym_hashes[r_symndx - symtab_hdr->sh_info];
-	  while (h->root.type == bfd_link_hash_indirect
-		 || h->root.type == bfd_link_hash_warning)
-	    {
-#ifdef INCLUDE_SHMEDIA
-	      seen_stt_datalabel |= h->type == STT_DATALABEL;
-#endif
-	      h = (struct elf_link_hash_entry *) h->root.u.i.link;
-	    }
-	  eh = (struct elf_sh_link_hash_entry *) h;
-	  for (pp = &eh->dyn_relocs; (p = *pp) != NULL; pp = &p->next)
-	    if (p->sec == sec)
-	      {
-		/* Everything must go for SEC.  */
-		*pp = p->next;
-		break;
-	      }
-	}
-
-      r_type = ELF32_R_TYPE (rel->r_info);
-      switch (sh_elf_optimized_tls_reloc (info, r_type, h != NULL))
-	{
-	case R_SH_TLS_LD_32:
-	  if (sh_elf_hash_table (info)->tls_ldm_got.refcount > 0)
-	    sh_elf_hash_table (info)->tls_ldm_got.refcount -= 1;
-	  break;
-
-	case R_SH_GOT32:
-	case R_SH_GOT20:
-	case R_SH_GOTOFF:
-	case R_SH_GOTOFF20:
-	case R_SH_GOTPC:
-#ifdef INCLUDE_SHMEDIA
-	case R_SH_GOT_LOW16:
-	case R_SH_GOT_MEDLOW16:
-	case R_SH_GOT_MEDHI16:
-	case R_SH_GOT_HI16:
-	case R_SH_GOT10BY4:
-	case R_SH_GOT10BY8:
-	case R_SH_GOTOFF_LOW16:
-	case R_SH_GOTOFF_MEDLOW16:
-	case R_SH_GOTOFF_MEDHI16:
-	case R_SH_GOTOFF_HI16:
-	case R_SH_GOTPC_LOW16:
-	case R_SH_GOTPC_MEDLOW16:
-	case R_SH_GOTPC_MEDHI16:
-	case R_SH_GOTPC_HI16:
-#endif
-	case R_SH_TLS_GD_32:
-	case R_SH_TLS_IE_32:
-	case R_SH_GOTFUNCDESC:
-	case R_SH_GOTFUNCDESC20:
-	  if (h != NULL)
-	    {
-#ifdef INCLUDE_SHMEDIA
-	      if (seen_stt_datalabel)
-		{
-		  struct elf_sh_link_hash_entry *eh;
-		  eh = (struct elf_sh_link_hash_entry *) h;
-		  if (eh->datalabel_got.refcount > 0)
-		    eh->datalabel_got.refcount -= 1;
-		}
-	      else
-#endif
-		if (h->got.refcount > 0)
-		  h->got.refcount -= 1;
-	    }
-	  else if (local_got_refcounts != NULL)
-	    {
-#ifdef INCLUDE_SHMEDIA
-	      if (rel->r_addend & 1)
-		{
-		  if (local_got_refcounts[symtab_hdr->sh_info + r_symndx] > 0)
-		    local_got_refcounts[symtab_hdr->sh_info + r_symndx] -= 1;
-		}
-	      else
-#endif
-		if (local_got_refcounts[r_symndx] > 0)
-		  local_got_refcounts[r_symndx] -= 1;
-	    }
-	  break;
-
-	case R_SH_FUNCDESC:
-	  if (h != NULL)
-	    sh_elf_hash_entry (h)->abs_funcdesc_refcount -= 1;
-	  else if (sh_elf_hash_table (info)->fdpic_p && !bfd_link_pic (info))
-	    sh_elf_hash_table (info)->srofixup->size -= 4;
-
-	  /* Fall through.  */
-
-	case R_SH_GOTOFFFUNCDESC:
-	case R_SH_GOTOFFFUNCDESC20:
-	  if (h != NULL)
-	    sh_elf_hash_entry (h)->funcdesc.refcount -= 1;
-	  else
-	    local_funcdesc[r_symndx].refcount -= 1;
-	  break;
-
-	case R_SH_DIR32:
-	  if (sh_elf_hash_table (info)->fdpic_p && !bfd_link_pic (info)
-	      && (sec->flags & SEC_ALLOC) != 0)
-	    sh_elf_hash_table (info)->srofixup->size -= 4;
-	  /* Fall thru */
-
-	case R_SH_REL32:
-	  if (bfd_link_pic (info))
-	    break;
-	  /* Fall thru */
-
-	case R_SH_PLT32:
-#ifdef INCLUDE_SHMEDIA
-	case R_SH_PLT_LOW16:
-	case R_SH_PLT_MEDLOW16:
-	case R_SH_PLT_MEDHI16:
-	case R_SH_PLT_HI16:
-#endif
-	  if (h != NULL)
-	    {
-	      if (h->plt.refcount > 0)
-		h->plt.refcount -= 1;
-	    }
-	  break;
-
-	case R_SH_GOTPLT32:
-#ifdef INCLUDE_SHMEDIA
-	case R_SH_GOTPLT_LOW16:
-	case R_SH_GOTPLT_MEDLOW16:
-	case R_SH_GOTPLT_MEDHI16:
-	case R_SH_GOTPLT_HI16:
-	case R_SH_GOTPLT10BY4:
-	case R_SH_GOTPLT10BY8:
-#endif
-	  if (h != NULL)
-	    {
-	      struct elf_sh_link_hash_entry *eh;
-	      eh = (struct elf_sh_link_hash_entry *) h;
-	      if (eh->gotplt_refcount > 0)
-		{
-		  eh->gotplt_refcount -= 1;
-		  if (h->plt.refcount > 0)
-		    h->plt.refcount -= 1;
-		}
-#ifdef INCLUDE_SHMEDIA
-	      else if (seen_stt_datalabel)
-		{
-		  if (eh->datalabel_got.refcount > 0)
-		    eh->datalabel_got.refcount -= 1;
-		}
-#endif
-	      else if (h->got.refcount > 0)
-		h->got.refcount -= 1;
-	    }
-	  else if (local_got_refcounts != NULL)
-	    {
-#ifdef INCLUDE_SHMEDIA
-	      if (rel->r_addend & 1)
-		{
-		  if (local_got_refcounts[symtab_hdr->sh_info + r_symndx] > 0)
-		    local_got_refcounts[symtab_hdr->sh_info + r_symndx] -= 1;
-		}
-	      else
-#endif
-		if (local_got_refcounts[r_symndx] > 0)
-		  local_got_refcounts[r_symndx] -= 1;
-	    }
-	  break;
-
-	default:
-	  break;
-	}
-    }
-
-  return TRUE;
 }
 
 /* Copy the extra info we tack onto an elf_link_hash_entry.  */
@@ -6653,7 +6433,7 @@ sh_elf_merge_private_data (bfd *ibfd, bfd *obfd)
       elf_elfheader (obfd)->e_flags = elf_elfheader (ibfd)->e_flags;
       sh_elf_set_mach_from_flags (obfd);
       if (elf_elfheader (obfd)->e_flags & EF_SH_FDPIC)
-	elf_elfheader (obfd)->e_flags |= EF_SH_PIC;
+	elf_elfheader (obfd)->e_flags &= ~EF_SH_PIC;
     }
 
   if (! sh_merge_bfd_arch (ibfd, obfd))
@@ -7461,7 +7241,6 @@ sh_elf_encode_eh_address (bfd *abfd,
 					sh_elf_merge_private_data
 
 #define elf_backend_gc_mark_hook	sh_elf_gc_mark_hook
-#define elf_backend_gc_sweep_hook	sh_elf_gc_sweep_hook
 #define elf_backend_check_relocs	sh_elf_check_relocs
 #define elf_backend_copy_indirect_symbol \
 					sh_elf_copy_indirect_symbol

@@ -1,5 +1,5 @@
 /* Helper routines for C++ support in GDB.
-   Copyright (C) 2003-2015 Free Software Foundation, Inc.
+   Copyright (C) 2003-2016 Free Software Foundation, Inc.
 
    Contributed by David Carlton and by Kealia, Inc.
 
@@ -79,8 +79,8 @@ cp_scan_for_anonymous_namespaces (const struct symbol *const symbol,
 			      ? 0 : previous_component - 2);
 	      int src_len = next_component;
 
-	      char *dest = alloca (dest_len + 1);
-	      char *src = alloca (src_len + 1);
+	      char *dest = (char *) alloca (dest_len + 1);
+	      char *src = (char *) alloca (src_len + 1);
 
 	      memcpy (dest, name, dest_len);
 	      memcpy (src, name, src_len);
@@ -170,7 +170,7 @@ cp_lookup_bare_symbol (const struct language_defn *langdef,
      ':' may be in the args of a template spec.  This isn't intended to be
      a complete test, just cheap and documentary.  */
   if (strchr (name, '<') == NULL && strchr (name, '(') == NULL)
-    gdb_assert (strchr (name, ':') == NULL);
+    gdb_assert (strstr (name, "::") == NULL);
 
   sym = lookup_symbol_in_static_block (name, block, domain);
   if (sym.symbol != NULL)
@@ -206,16 +206,21 @@ cp_lookup_bare_symbol (const struct language_defn *langdef,
       struct block_symbol lang_this;
       struct type *type;
 
-      lang_this = lookup_language_this (language_def (language_cplus), block);
+      lang_this.symbol = NULL;
+
+      if (langdef != NULL)
+	lang_this = lookup_language_this (langdef, block);
+
       if (lang_this.symbol == NULL)
-	return (struct block_symbol) {NULL, NULL};
+	return null_block_symbol;
+
 
       type = check_typedef (TYPE_TARGET_TYPE (SYMBOL_TYPE (lang_this.symbol)));
       /* If TYPE_NAME is NULL, abandon trying to find this symbol.
 	 This can happen for lambda functions compiled with clang++,
 	 which outputs no name for the container class.  */
       if (TYPE_NAME (type) == NULL)
-	return (struct block_symbol) {NULL, NULL};
+	return null_block_symbol;
 
       /* Look for symbol NAME in this class.  */
       sym = cp_lookup_nested_symbol (type, name, block, domain);
@@ -246,10 +251,9 @@ cp_search_static_and_baseclasses (const char *name,
   struct block_symbol klass_sym;
   struct type *klass_type;
 
-  /* The test here uses <= instead of < because Fortran also uses this,
-     and the module.exp testcase will pass "modmany::" for NAME here.  */
-  gdb_assert (prefix_len + 2 <= strlen (name));
-  gdb_assert (name[prefix_len + 1] == ':');
+  /* Check for malformed input.  */
+  if (prefix_len + 2 > strlen (name) || name[prefix_len + 1] != ':')
+    return null_block_symbol;
 
   /* Find the name of the class and the name of the method, variable, etc.  */
 
@@ -273,7 +277,7 @@ cp_search_static_and_baseclasses (const char *name,
   if (klass_sym.symbol == NULL)
     {
       do_cleanups (cleanup);
-      return (struct block_symbol) {NULL, NULL};
+      return null_block_symbol;
     }
   klass_type = SYMBOL_TYPE (klass_sym.symbol);
 
@@ -308,8 +312,8 @@ cp_lookup_symbol_in_namespace (const char *the_namespace, const char *name,
 
   if (the_namespace[0] != '\0')
     {
-      concatenated_name = alloca (strlen (the_namespace) + 2
-				  + strlen (name) + 1);
+      concatenated_name
+	= (char *) alloca (strlen (the_namespace) + 2 + strlen (name) + 1);
       strcpy (concatenated_name, the_namespace);
       strcat (concatenated_name, "::");
       strcat (concatenated_name, name);
@@ -343,7 +347,7 @@ cp_lookup_symbol_in_namespace (const char *the_namespace, const char *name,
 static void
 reset_directive_searched (void *data)
 {
-  struct using_direct *direct = data;
+  struct using_direct *direct = (struct using_direct *) data;
   direct->searched = 0;
 }
 
@@ -492,7 +496,7 @@ cp_lookup_symbol_via_imports (const char *scope,
 	}
     }
 
-  return (struct block_symbol) {NULL, NULL};
+  return null_block_symbol;
 }
 
 /* Helper function that searches an array of symbols for one named NAME.  */
@@ -640,7 +644,7 @@ cp_lookup_symbol_via_all_imports (const char *scope, const char *name,
       block = BLOCK_SUPERBLOCK (block);
     }
 
-  return (struct block_symbol) {NULL, NULL};
+  return null_block_symbol;
 }
 
 /* Searches for NAME in the current namespace, and by applying
@@ -740,7 +744,7 @@ lookup_namespace_scope (const struct language_defn *langdef,
   if (scope_len == 0 && strchr (name, ':') == NULL)
     return cp_lookup_bare_symbol (langdef, name, block, domain, 1);
 
-  the_namespace = alloca (scope_len + 1);
+  the_namespace = (char *) alloca (scope_len + 1);
   strncpy (the_namespace, scope, scope_len);
   the_namespace[scope_len] = '\0';
   return cp_lookup_symbol_in_namespace (the_namespace, name,
@@ -846,7 +850,7 @@ find_symbol_in_baseclass (struct type *parent_type, const char *name,
 	continue;
 
       len = strlen (base_name) + 2 + strlen (name) + 1;
-      concatenated_name = xrealloc (concatenated_name, len);
+      concatenated_name = (char *) xrealloc (concatenated_name, len);
       xsnprintf (concatenated_name, len, "%s::%s", base_name, name);
 
       sym = cp_lookup_nested_symbol_1 (base_type, name, concatenated_name,
@@ -928,7 +932,7 @@ cp_lookup_nested_symbol_1 (struct type *container_type,
 	return sym;
     }
 
-  return (struct block_symbol) {NULL, NULL};
+  return null_block_symbol;
 }
 
 /* Look up a symbol named NESTED_NAME that is nested inside the C++
@@ -977,7 +981,7 @@ cp_lookup_nested_symbol (struct type *parent_type,
 	int is_in_anonymous;
 
 	size = strlen (parent_name) + 2 + strlen (nested_name) + 1;
-	concatenated_name = alloca (size);
+	concatenated_name = (char *) alloca (size);
 	xsnprintf (concatenated_name, size, "%s::%s",
 		   parent_name, nested_name);
 	is_in_anonymous = cp_is_in_anonymous (concatenated_name);
@@ -1005,7 +1009,7 @@ cp_lookup_nested_symbol (struct type *parent_type,
 			      "cp_lookup_nested_symbol (...) = NULL"
 			      " (func/method)\n");
 	}
-      return (struct block_symbol) {NULL, NULL};
+      return null_block_symbol;
 
     default:
       internal_error (__FILE__, __LINE__,
@@ -1076,7 +1080,7 @@ cp_lookup_transparent_type_loop (const char *name,
 	return retval;
     }
 
-  full_name = alloca (scope_length + 2 + strlen (name) + 1);
+  full_name = (char *) alloca (scope_length + 2 + strlen (name) + 1);
   strncpy (full_name, scope, scope_length);
   strncpy (full_name + scope_length, "::", 2);
   strcpy (full_name + scope_length + 2, name);

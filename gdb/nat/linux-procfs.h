@@ -1,5 +1,5 @@
 /* Linux-specific PROCFS manipulation routines.
-   Copyright (C) 2011-2015 Free Software Foundation, Inc.
+   Copyright (C) 2011-2016 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -54,10 +54,12 @@ extern int linux_proc_pid_is_zombie_nowarn (pid_t pid);
 
 extern int linux_proc_pid_is_gone (pid_t pid);
 
-/* Return an opaque string giving the thread's name or NULL if the
-   information is unavailable.  The returned string must be released
-   with xfree.  */
-extern char *linux_proc_tid_get_name (ptid_t ptid);
+/* Return a string giving the thread's name or NULL if the
+   information is unavailable.  The returned value points to a statically
+   allocated buffer.  The value therefore becomes invalid at the next
+   linux_proc_tid_get_name call.  */
+
+extern const char *linux_proc_tid_get_name (ptid_t ptid);
 
 /* Callback function for linux_proc_attach_tgid_threads.  If the PTID
    thread is not yet known, try to attach to it and return true,

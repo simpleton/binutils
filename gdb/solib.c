@@ -1,6 +1,6 @@
 /* Handle shared libraries for GDB, the GNU Debugger.
 
-   Copyright (C) 1990-2015 Free Software Foundation, Inc.
+   Copyright (C) 1990-2016 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -68,7 +68,8 @@ solib_init (struct obstack *obstack)
 const struct target_so_ops *
 solib_ops (struct gdbarch *gdbarch)
 {
-  const struct target_so_ops **ops = gdbarch_data (gdbarch, solib_data);
+  const struct target_so_ops **ops
+    = (const struct target_so_ops **) gdbarch_data (gdbarch, solib_data);
 
   return *ops;
 }
@@ -78,7 +79,8 @@ solib_ops (struct gdbarch *gdbarch)
 void
 set_solib_ops (struct gdbarch *gdbarch, const struct target_so_ops *new_ops)
 {
-  const struct target_so_ops **ops = gdbarch_data (gdbarch, solib_data);
+  const struct target_so_ops **ops
+    = (const struct target_so_ops **) gdbarch_data (gdbarch, solib_data);
 
   *ops = new_ops;
 }
@@ -169,17 +171,26 @@ solib_find_1 (char *in_pathname,
   const char *fskind = effective_target_file_system_kind ();
   struct cleanup *old_chain;
   char *sysroot = gdb_sysroot;
+  char *found_by_extension;
 
   if (sysroot != NULL && extension_prefixed_p (sysroot))
     {
       sysroot += strlen (EXTENSION_SYSROOT_PREFIX);
-      return invoke_solib_find_hook (
+      found_by_extension = invoke_solib_find_hook (
 	sysroot,
 	in_pathname,
 	(is_solib
 	 ? FIND_HOOK_IS_SOLIB
 	 : 0),
 	hints);
+      if (found_by_extension)
+	{
+	  return found_by_extension;
+	}
+      /* Lookup using extension failed; fall back to built-in logic.
+	 We set sysroot to NULL, because there is no more information
+	 in there that we can use. */
+      sysroot = NULL;
     }
 
   old_chain = make_cleanup (null_cleanup, NULL);
@@ -215,7 +226,7 @@ solib_find_1 (char *in_pathname,
       char *p;
 
       /* Avoid clobbering our input.  */
-      p = alloca (strlen (in_pathname) + 1);
+      p = (char *) alloca (strlen (in_pathname) + 1);
       strcpy (p, in_pathname);
       in_pathname = p;
 
@@ -424,7 +435,7 @@ exec_file_find2 (char *in_pathname,
 	{
 	  char *new_pathname;
 
-	  new_pathname = alloca (strlen (in_pathname) + 5);
+	  new_pathname = (char *) alloca (strlen (in_pathname) + 5);
 	  strcpy (new_pathname, in_pathname);
 	  strcat (new_pathname, ".exe");
 
@@ -475,8 +486,9 @@ solib_find (char *in_pathname,
 	{
 	  char *new_pathname;
 
-	  new_pathname = alloca (p - in_pathname + 1
-				 + strlen (solib_symbols_extension) + 1);
+	  new_pathname
+	    = (char *) alloca (p - in_pathname + 1
+			       + strlen (solib_symbols_extension) + 1);
 	  memcpy (new_pathname, in_pathname, p - in_pathname + 1);
 	  strcpy (new_pathname + (p - in_pathname) + 1,
 		  solib_symbols_extension);
@@ -761,16 +773,16 @@ solib_read_symbols (struct so_list *so, int flags)
 		  && so->objfile->addr_low == so->addr_low)
 		break;
 	    }
-	  if (so->objfile != NULL)
-	    break;
-
-	  sap = build_section_addr_info_from_section_table (so->sections,
-							    so->sections_end);
-	  so->objfile = symbol_file_add_from_bfd (so->abfd, so->so_name,
-						  flags, sap, OBJF_SHARED,
-						  NULL);
-	  so->objfile->addr_low = so->addr_low;
-	  free_section_addr_info (sap);
+	  if (so->objfile == NULL)
+	    {
+	      sap = build_section_addr_info_from_section_table (so->sections,
+								so->sections_end);
+	      so->objfile = symbol_file_add_from_bfd (so->abfd, so->so_name,
+						      flags, sap, OBJF_SHARED,
+						      NULL);
+	      so->objfile->addr_low = so->addr_low;
+	      free_section_addr_info (sap);
+	    }
 
 	  so->symbols_loaded = 1;
 	}
@@ -1609,7 +1621,7 @@ solib_global_lookup (struct objfile *objfile,
 		     const char *name,
 		     const domain_enum domain)
 {
-  const struct target_so_ops *ops = solib_ops (get_objfile_arch (objfile));
+  const struct target_so_ops *ops = solib_ops (target_gdbarch ());
 
   if (ops->lookup_lib_global_symbol != NULL)
     return ops->lookup_lib_global_symbol (objfile, name, domain);
@@ -1623,8 +1635,9 @@ solib_global_lookup (struct objfile *objfile,
 
 CORE_ADDR
 gdb_bfd_lookup_symbol_from_symtab (bfd *abfd,
-				   int (*match_sym) (asymbol *, void *),
-				   void *data)
+				   int (*match_sym) (const asymbol *,
+						     const void *),
+				   const void *data)
 {
   long storage_needed = bfd_get_symtab_upper_bound (abfd);
   CORE_ADDR symaddr = 0;
@@ -1682,8 +1695,9 @@ gdb_bfd_lookup_symbol_from_symtab (bfd *abfd,
 
 static CORE_ADDR
 bfd_lookup_symbol_from_dyn_symtab (bfd *abfd,
-				   int (*match_sym) (asymbol *, void *),
-				   void *data)
+				   int (*match_sym) (const asymbol *,
+						     const void *),
+				   const void *data)
 {
   long storage_needed = bfd_get_dynamic_symtab_upper_bound (abfd);
   CORE_ADDR symaddr = 0;
@@ -1720,8 +1734,8 @@ bfd_lookup_symbol_from_dyn_symtab (bfd *abfd,
 
 CORE_ADDR
 gdb_bfd_lookup_symbol (bfd *abfd,
-		       int (*match_sym) (asymbol *, void *),
-		       void *data)
+		       int (*match_sym) (const asymbol *, const void *),
+		       const void *data)
 {
   CORE_ADDR symaddr = gdb_bfd_lookup_symbol_from_symtab (abfd, match_sym, data);
 

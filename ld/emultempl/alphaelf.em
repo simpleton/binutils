@@ -1,5 +1,5 @@
 # This shell script emits a C file. -*- C -*-
-#   Copyright (C) 2003-2015 Free Software Foundation, Inc.
+#   Copyright (C) 2003-2016 Free Software Foundation, Inc.
 #
 # This file is part of the GNU Binutils.
 #
@@ -82,7 +82,7 @@ alpha_after_parse (void)
 				   exp_nameop (SIZEOF_HEADERS, NULL)),
 			NULL);
 
-  after_parse_default ();
+  gld${EMULATION_NAME}_after_parse ();
 }
 
 static void

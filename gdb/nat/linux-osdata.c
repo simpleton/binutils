@@ -1,6 +1,6 @@
 /* Linux-specific functions to retrieve OS data.
    
-   Copyright (C) 2009-2015 Free Software Foundation, Inc.
+   Copyright (C) 2009-2016 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -79,7 +79,7 @@ linux_common_core_of_thread (ptid_t ptid)
   for (;;)
     {
       int n;
-      content = xrealloc (content, content_read + 1024);
+      content = (char *) xrealloc (content, content_read + 1024);
       n = fread (content + content_read, 1, 1024, f);
       content_read += n;
       if (n < 1024)
@@ -114,12 +114,9 @@ char *
 linux_common_name_of_thread (ptid_t ptid)
 {
   static char buf[16 /*kernel maximum */ + 1];
-  char* name = linux_proc_tid_get_name (ptid);
+  const char* name = linux_proc_tid_get_name (ptid);
   if (name)
-    {
-      snprintf (buf, sizeof (buf), "%s", name);
-      free (name);
-    }
+    snprintf (buf, sizeof (buf), "%s", name);
   else
     buf[0] = '\0';
 
@@ -354,7 +351,7 @@ linux_xfer_osdata_processes (gdb_byte *readbuf,
 		strcpy (user, "?");
 
 	      /* Find CPU cores used by the process.  */
-	      cores = (int *) xcalloc (num_cores, sizeof (int));
+	      cores = XCNEWVEC (int, num_cores);
 	      task_count = get_cores_used_by_process (pid, cores, num_cores);
 	      cores_str = (char *) xcalloc (task_count, sizeof ("4294967295") + 1);
 
@@ -477,7 +474,7 @@ linux_xfer_osdata_processgroups (gdb_byte *readbuf,
 	{
 	  struct dirent *dp;
 	  const size_t list_block_size = 512;
-	  PID_T *process_list = (PID_T *) xmalloc (list_block_size * 2 * sizeof (PID_T));
+	  PID_T *process_list = XNEWVEC (PID_T, list_block_size * 2);
 	  size_t process_count = 0;
 	  size_t i;
 

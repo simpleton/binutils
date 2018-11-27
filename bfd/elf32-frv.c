@@ -1,5 +1,5 @@
 /* FRV-specific support for 32-bit ELF.
-   Copyright (C) 2002-2015 Free Software Foundation, Inc.
+   Copyright (C) 2002-2016 Free Software Foundation, Inc.
 
    This file is part of BFD, the Binary File Descriptor library.
 
@@ -4031,13 +4031,13 @@ elf32_frv_relocate_section (bfd *output_bfd ATTRIBUTE_UNUSED,
 	  switch (r)
 	    {
 	    case bfd_reloc_overflow:
-	      r = info->callbacks->reloc_overflow
+	      (*info->callbacks->reloc_overflow)
 		(info, (h ? &h->root : NULL), name, howto->name,
 		 (bfd_vma) 0, input_bfd, input_section, rel->r_offset);
 	      break;
 
 	    case bfd_reloc_undefined:
-	      r = info->callbacks->undefined_symbol
+	      (*info->callbacks->undefined_symbol)
 		(info, name, input_bfd, input_section, rel->r_offset, TRUE);
 	      break;
 
@@ -4065,9 +4065,6 @@ elf32_frv_relocate_section (bfd *output_bfd ATTRIBUTE_UNUSED,
 		 input_bfd, input_section, rel->r_offset, name, msg);
 	      return FALSE;
 	    }
-
-	  if (! r)
-	    return FALSE;
 	}
     }
 
@@ -4640,7 +4637,7 @@ _frvfdpic_relax_tls_entries (struct frvfdpic_relocs_info *entry,
 			    + 32768) < (bfd_vma)65536))
 	  || (entry->symndx != -1
 	      && (elf_hash_table (dinfo->info)->tls_sec->size
-		  + abs (entry->addend) < 32768 + FRVFDPIC_TLS_BIAS))))
+		  + entry->addend < 32768 + FRVFDPIC_TLS_BIAS))))
     {
       if (! changed)
 	{
@@ -5442,7 +5439,7 @@ elf32_frvfdpic_size_dynamic_sections (bfd *output_bfd,
   if (elf_hash_table (info)->dynamic_sections_created)
     {
       /* Set the contents of the .interp section to the interpreter.  */
-      if (bfd_link_executable (info))
+      if (bfd_link_executable (info) && !info->nointerp)
 	{
 	  s = bfd_get_linker_section (dynobj, ".interp");
 	  BFD_ASSERT (s != NULL);

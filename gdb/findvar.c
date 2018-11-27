@@ -1,6 +1,6 @@
 /* Find a variable's value in memory, for GDB, the GNU debugger.
 
-   Copyright (C) 1986-2015 Free Software Foundation, Inc.
+   Copyright (C) 1986-2016 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -337,14 +337,13 @@ address_to_signed_pointer (struct gdbarch *gdbarch, struct type *type,
   store_signed_integer (buf, TYPE_LENGTH (type), byte_order, addr);
 }
 
-/* Will calling read_var_value or locate_var_value on SYM end
-   up caring what frame it is being evaluated relative to?  SYM must
-   be non-NULL.  */
-int
-symbol_read_needs_frame (struct symbol *sym)
+/* See value.h.  */
+
+enum symbol_needs_kind
+symbol_read_needs (struct symbol *sym)
 {
   if (SYMBOL_COMPUTED_OPS (sym) != NULL)
-    return SYMBOL_COMPUTED_OPS (sym)->read_needs_frame (sym);
+    return SYMBOL_COMPUTED_OPS (sym)->get_symbol_read_needs (sym);
 
   switch (SYMBOL_CLASS (sym))
     {
@@ -358,7 +357,7 @@ symbol_read_needs_frame (struct symbol *sym)
     case LOC_REF_ARG:
     case LOC_REGPARM_ADDR:
     case LOC_LOCAL:
-      return 1;
+      return SYMBOL_NEEDS_FRAME;
 
     case LOC_UNDEF:
     case LOC_CONST:
@@ -374,9 +373,17 @@ symbol_read_needs_frame (struct symbol *sym)
     case LOC_CONST_BYTES:
     case LOC_UNRESOLVED:
     case LOC_OPTIMIZED_OUT:
-      return 0;
+      return SYMBOL_NEEDS_NONE;
     }
-  return 1;
+  return SYMBOL_NEEDS_FRAME;
+}
+
+/* See value.h.  */
+
+int
+symbol_read_needs_frame (struct symbol *sym)
+{
+  return symbol_read_needs (sym) == SYMBOL_NEEDS_FRAME;
 }
 
 /* Private data to be used with minsym_lookup_iterator_cb.  */
@@ -435,6 +442,7 @@ follow_static_link (struct frame_info *frame,
       /* If we don't know how to compute FRAME's base address, don't give up:
 	 maybe the frame we are looking for is upper in the stace frame.  */
       if (framefunc != NULL
+	  && SYMBOL_BLOCK_OPS (framefunc) != NULL
 	  && SYMBOL_BLOCK_OPS (framefunc)->get_frame_base != NULL
 	  && (SYMBOL_BLOCK_OPS (framefunc)->get_frame_base (framefunc, frame)
 	      == upper_frame_base))
@@ -574,6 +582,7 @@ default_read_var_value (struct symbol *var, const struct block *var_block,
   struct value *v;
   struct type *type = SYMBOL_TYPE (var);
   CORE_ADDR addr;
+  enum symbol_needs_kind sym_need;
 
   /* Call check_typedef on our type to make sure that, if TYPE is
      a TYPE_CODE_TYPEDEF, its length is set to the length of the target type
@@ -582,8 +591,11 @@ default_read_var_value (struct symbol *var, const struct block *var_block,
      set the returned value type description correctly.  */
   check_typedef (type);
 
-  if (symbol_read_needs_frame (var))
+  sym_need = symbol_read_needs (var);
+  if (sym_need == SYMBOL_NEEDS_FRAME)
     gdb_assert (frame != NULL);
+  else if (sym_need == SYMBOL_NEEDS_REGISTERS && !target_has_registers)
+    error (_("Cannot read `%s' without registers"), SYMBOL_PRINT_NAME (var));
 
   if (frame != NULL)
     frame = get_hosting_frame (var, var_block, frame);
@@ -737,16 +749,31 @@ default_read_var_value (struct symbol *var, const struct block *var_block,
 	   symbol_objfile (var));
 	msym = lookup_data.result.minsym;
 
+	/* If we can't find the minsym there's a problem in the symbol info.
+	   The symbol exists in the debug info, but it's missing in the minsym
+	   table.  */
 	if (msym == NULL)
-	  error (_("No global symbol \"%s\"."), SYMBOL_LINKAGE_NAME (var));
-	if (overlay_debugging)
-	  addr = symbol_overlayed_address (BMSYMBOL_VALUE_ADDRESS (lookup_data.result),
-					   MSYMBOL_OBJ_SECTION (lookup_data.result.objfile,
-								msym));
-	else
-	  addr = BMSYMBOL_VALUE_ADDRESS (lookup_data.result);
+	  {
+	    const char *flavour_name
+	      = objfile_flavour_name (symbol_objfile (var));
 
+	    /* We can't get here unless we've opened the file, so flavour_name
+	       can't be NULL.  */
+	    gdb_assert (flavour_name != NULL);
+	    error (_("Missing %s symbol \"%s\"."),
+		   flavour_name, SYMBOL_LINKAGE_NAME (var));
+	  }
 	obj_section = MSYMBOL_OBJ_SECTION (lookup_data.result.objfile, msym);
+	/* Relocate address, unless there is no section or the variable is
+	   a TLS variable. */
+	if (obj_section == NULL
+	    || (obj_section->the_bfd_section->flags & SEC_THREAD_LOCAL) != 0)
+	   addr = MSYMBOL_VALUE_RAW_ADDRESS (msym);
+	else
+	   addr = BMSYMBOL_VALUE_ADDRESS (lookup_data.result);
+	if (overlay_debugging)
+	  addr = symbol_overlayed_address (addr, obj_section);
+	/* Determine address of TLS variable. */
 	if (obj_section
 	    && (obj_section->the_bfd_section->flags & SEC_THREAD_LOCAL) != 0)
 	  addr = target_translate_tls_address (obj_section->objfile, addr);
@@ -819,8 +846,8 @@ void
 read_frame_register_value (struct value *value, struct frame_info *frame)
 {
   struct gdbarch *gdbarch = get_frame_arch (frame);
-  int offset = 0;
-  int reg_offset = value_offset (value);
+  LONGEST offset = 0;
+  LONGEST reg_offset = value_offset (value);
   int regnum = VALUE_REGNUM (value);
   int len = type_length_units (check_typedef (value_type (value)));
 
@@ -912,6 +939,12 @@ address_from_register (int regnum, struct frame_info *frame)
   struct type *type = builtin_type (gdbarch)->builtin_data_ptr;
   struct value *value;
   CORE_ADDR result;
+  int regnum_max_excl = (gdbarch_num_regs (gdbarch)
+			 + gdbarch_num_pseudo_regs (gdbarch));
+
+  if (regnum < 0 || regnum >= regnum_max_excl)
+    error (_("Invalid register #%d, expecting 0 <= # < %d"), regnum,
+	   regnum_max_excl);
 
   /* This routine may be called during early unwinding, at a time
      where the ID of FRAME is not yet known.  Calling value_from_register
@@ -924,7 +957,7 @@ address_from_register (int regnum, struct frame_info *frame)
      pointer types.  Avoid constructing a value object in those cases.  */
   if (gdbarch_convert_register_p (gdbarch, regnum, type))
     {
-      gdb_byte *buf = alloca (TYPE_LENGTH (type));
+      gdb_byte *buf = (gdb_byte *) alloca (TYPE_LENGTH (type));
       int optim, unavail, ok;
 
       ok = gdbarch_register_to_value (gdbarch, frame, regnum, type,

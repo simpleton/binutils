@@ -1,6 +1,6 @@
 /* Symbol table definitions for GDB.
 
-   Copyright (C) 1986-2015 Free Software Foundation, Inc.
+   Copyright (C) 1986-2016 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -23,6 +23,7 @@
 #include "vec.h"
 #include "gdb_vecs.h"
 #include "gdbtypes.h"
+#include "common/enum-flags.h"
 
 /* Opaque declarations.  */
 struct ui_file;
@@ -137,11 +138,7 @@ struct general_symbol_info
 
     /* This is used by languages which wish to store a demangled name.
        currently used by Ada, C++, Java, and Objective C.  */
-    struct mangled_lang
-    {
-      const char *demangled_name;
-    }
-    mangled_lang;
+    const char *demangled_name;
   }
   language_specific;
 
@@ -151,7 +148,7 @@ struct general_symbol_info
 
   ENUM_BITFIELD(language) language : LANGUAGE_BITS;
 
-  /* This is only used by Ada.  If set, then the 'mangled_lang' field
+  /* This is only used by Ada.  If set, then the 'demangled_name' field
      of language_specific is valid.  Otherwise, the 'obstack' field is
      valid.  */
   unsigned int ada_mangled : 1;
@@ -584,7 +581,13 @@ enum address_class
      not find it in the full symbol table.  But a reference to an external
      symbol in a local block shadowing other definition requires full symbol
      without possibly having its address available for LOC_STATIC.  Testcase
-     is provided as `gdb.dwarf2/dw2-unresolved.exp'.  */
+     is provided as `gdb.dwarf2/dw2-unresolved.exp'.
+
+     This is also used for thread local storage (TLS) variables.  In this case,
+     the address of the TLS variable must be determined when the variable is
+     referenced, from the MSYMBOL_VALUE_RAW_ADDRESS, which is the offset
+     of the TLS variable in the thread local storage of the shared
+     library/object.  */
 
   LOC_UNRESOLVED,
 
@@ -626,7 +629,8 @@ struct symbol_computed_ops
      frame FRAME.  If the variable has been optimized out, return
      zero.
 
-     Iff `read_needs_frame (SYMBOL)' is zero, then FRAME may be zero.  */
+     Iff `read_needs_frame (SYMBOL)' is not SYMBOL_NEEDS_FRAME, then
+     FRAME may be zero.  */
 
   struct value *(*read_variable) (struct symbol * symbol,
 				  struct frame_info * frame);
@@ -637,8 +641,11 @@ struct symbol_computed_ops
   struct value *(*read_variable_at_entry) (struct symbol *symbol,
 					   struct frame_info *frame);
 
-  /* Return non-zero if we need a frame to find the value of the SYMBOL.  */
-  int (*read_needs_frame) (struct symbol * symbol);
+  /* Find the "symbol_needs_kind" value for the given symbol.  This
+     value determines whether reading the symbol needs memory (e.g., a
+     global variable), just registers (a thread-local), or a frame (a
+     local variable).  */
+  enum symbol_needs_kind (*get_symbol_read_needs) (struct symbol * symbol);
 
   /* Write to STREAM a natural-language description of the location of
      SYMBOL, in the context of ADDR.  */
@@ -800,11 +807,10 @@ struct symbol
   /* An arbitrary data pointer, allowing symbol readers to record
      additional information on a per-symbol basis.  Note that this data
      must be allocated using the same obstack as the symbol itself.  */
-  /* So far it is only used by LOC_COMPUTED to
-     find the location information.  For a LOC_BLOCK symbol
-     for a function in a compilation unit compiled with DWARF 2
-     information, this is information used internally by the DWARF 2
-     code --- specifically, the location expression for the frame
+  /* So far it is only used by:
+     LOC_COMPUTED: to find the location information
+     LOC_BLOCK (DWARF2 function): information used internally by the
+     DWARF 2 code --- specifically, the location expression for the frame
      base for this function.  */
   /* FIXME drow/2003-02-21: For the LOC_BLOCK case, it might be better
      to add a magic symbol to the block containing this information,
@@ -829,6 +835,10 @@ struct block_symbol
 };
 
 extern const struct symbol_impl *symbol_impls;
+
+/* For convenience.  All fields are NULL.  This means "there is no
+   symbol".  */
+extern const struct block_symbol null_block_symbol;
 
 /* Note: There is no accessor macro for symbol.owner because it is
    "private".  */
@@ -1469,7 +1479,7 @@ extern int identify_source_line (struct symtab *, int, int, CORE_ADDR);
 
 /* Flags passed as 4th argument to print_source_lines.  */
 
-enum print_source_lines_flags
+enum print_source_lines_flag
   {
     /* Do not print an error message.  */
     PRINT_SOURCE_LINES_NOERROR = (1 << 0),
@@ -1477,9 +1487,10 @@ enum print_source_lines_flags
     /* Print the filename in front of the source lines.  */
     PRINT_SOURCE_LINES_FILENAME = (1 << 1)
   };
+DEF_ENUM_FLAGS_TYPE (enum print_source_lines_flag, print_source_lines_flags);
 
 extern void print_source_lines (struct symtab *, int, int,
-				enum print_source_lines_flags);
+				print_source_lines_flags);
 
 extern void forget_cached_source_info_for_objfile (struct objfile *);
 extern void forget_cached_source_info (void);
@@ -1593,6 +1604,9 @@ extern int basenames_may_differ;
 int compare_filenames_for_search (const char *filename,
 				  const char *search_name);
 
+int compare_glob_filenames_for_search (const char *filename,
+				       const char *search_name);
+
 int iterate_over_some_symtabs (const char *name,
 			       const char *real_path,
 			       int (*callback) (struct symtab *symtab,
@@ -1605,8 +1619,6 @@ void iterate_over_symtabs (const char *name,
 			   int (*callback) (struct symtab *symtab,
 					    void *data),
 			   void *data);
-
-DEF_VEC_I (CORE_ADDR);
 
 VEC (CORE_ADDR) *find_pcs_for_symtab_line (struct symtab *symtab, int line,
 					   struct linetable_entry **best_entry);

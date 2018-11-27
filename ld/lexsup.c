@@ -1,5 +1,5 @@
 /* Parse options for the GNU linker.
-   Copyright (C) 1991-2015 Free Software Foundation, Inc.
+   Copyright (C) 1991-2016 Free Software Foundation, Inc.
 
    This file is part of the GNU Binutils.
 
@@ -65,9 +65,9 @@ static void help (void);
 
 enum control_enum {
   /* Use one dash before long option name.  */
-  ONE_DASH,
+  ONE_DASH = 1,
   /* Use two dashes before long option name.  */
-  TWO_DASHES,
+  TWO_DASHES = 2,
   /* Only accept two dashes before the long option name.
      This is an overloading of the use of this enum, since originally it
      was only intended to tell the --help display function how to display
@@ -138,6 +138,9 @@ static const struct ld_option ld_options[] =
   { {"dynamic-linker", required_argument, NULL, OPTION_DYNAMIC_LINKER},
     'I', N_("PROGRAM"), N_("Set PROGRAM as the dynamic linker to use"),
     TWO_DASHES },
+  { {"no-dynamic-linker", no_argument, NULL, OPTION_NO_DYNAMIC_LINKER},
+    '\0', NULL, N_("Produce an executable with no program interpreter header"),
+    TWO_DASHES },
   { {"library", required_argument, NULL, 'l'},
     'l', N_("LIBNAME"), N_("Search for library LIBNAME"), TWO_DASHES },
   { {"library-path", required_argument, NULL, 'L'},
@@ -161,6 +164,8 @@ static const struct ld_option ld_options[] =
     'o', N_("FILE"), N_("Set output file name"), EXACTLY_TWO_DASHES },
   { {NULL, required_argument, NULL, '\0'},
     'O', NULL, N_("Optimize output file"), ONE_DASH },
+  { {"out-implib", required_argument, NULL, OPTION_OUT_IMPLIB},
+    '\0', N_("FILE"), N_("Generate import library"), TWO_DASHES },
 #ifdef ENABLE_PLUGINS
   { {"plugin", required_argument, NULL, OPTION_PLUGIN},
     '\0', N_("PLUGIN"), N_("Load named plugin"), ONE_DASH },
@@ -492,10 +497,6 @@ static const struct ld_option ld_options[] =
     '\0', NULL, N_("Warn if the multiple GP values are used"), TWO_DASHES },
   { {"warn-once", no_argument, NULL, OPTION_WARN_ONCE},
     '\0', NULL, N_("Warn only once per undefined symbol"), TWO_DASHES },
-  { {"warn-orphan", no_argument, NULL, OPTION_WARN_ORPHAN},
-    '\0', NULL, N_("Warn if any orphan sections are encountered"), TWO_DASHES },
-  { {"no-warn-orphan", no_argument, NULL, OPTION_NO_WARN_ORPHAN},
-    '\0', NULL, N_("Do not warn if orphan sections are encountered (default)"), TWO_DASHES },
   { {"warn-section-align", no_argument, NULL, OPTION_WARN_SECTION_ALIGN},
     '\0', NULL, N_("Warn if start of section changes due to alignment"),
     TWO_DASHES },
@@ -528,6 +529,9 @@ static const struct ld_option ld_options[] =
     TWO_DASHES },
   { {"print-memory-usage", no_argument, NULL, OPTION_PRINT_MEMORY_USAGE},
     '\0', NULL, N_("Report target memory usage"), TWO_DASHES },
+  { {"orphan-handling", required_argument, NULL, OPTION_ORPHAN_HANDLING},
+    '\0', N_("=MODE"), N_("Control how orphan sections are handled."),
+    TWO_DASHES },
 };
 
 #define OPTION_COUNT ARRAY_SIZE (ld_options)
@@ -677,7 +681,28 @@ parse_args (unsigned argc, char **argv)
       switch (optc)
 	{
 	case '?':
-	  einfo (_("%P: unrecognized option '%s'\n"), argv[last_optind]);
+	  {
+	    /* If the last word on the command line is an option that
+	       requires an argument, getopt will refuse to recognise it.
+	       Try to catch such options here and issue a more helpful
+	       error message than just "unrecognized option".  */
+	    int opt;
+
+	    for (opt = ARRAY_SIZE (ld_options); opt--;)
+	      if (ld_options[opt].opt.has_arg == required_argument
+		  /* FIXME: There are a few short options that do not
+		     have long equivalents, but which require arguments.
+		     We should handle them too.  */
+		  && ld_options[opt].opt.name != NULL
+		  && strcmp (argv[last_optind] + ld_options[opt].control, ld_options[opt].opt.name) == 0)
+		{
+		  einfo (_("%P: %s: missing argument\n"), argv[last_optind]);
+		  break;
+		}
+
+	    if (opt == -1)
+	      einfo (_("%P: unrecognized option '%s'\n"), argv[last_optind]);
+	  }
 	  /* Fall through.  */
 
 	default:
@@ -762,6 +787,10 @@ parse_args (unsigned argc, char **argv)
 	case 'I':		/* Used on Solaris.  */
 	case OPTION_DYNAMIC_LINKER:
 	  command_line.interpreter = optarg;
+	  link_info.nointerp = 0;
+	  break;
+	case OPTION_NO_DYNAMIC_LINKER:
+	  link_info.nointerp = 1;
 	  break;
 	case OPTION_SYSROOT:
 	  /* Already handled in ldmain.c.  */
@@ -977,6 +1006,9 @@ parse_args (unsigned argc, char **argv)
 	case OPTION_OFORMAT:
 	  lang_add_output_format (optarg, NULL, NULL, 0);
 	  break;
+	case OPTION_OUT_IMPLIB:
+	  command_line.out_implib_filename = xstrdup (optarg);
+	  break;
 	case OPTION_PRINT_SYSROOT:
 	  if (*ld_sysroot)
 	    puts (ld_sysroot);
@@ -991,7 +1023,7 @@ parse_args (unsigned argc, char **argv)
 	  break;
 	case OPTION_PLUGIN_OPT:
 	  if (plugin_opt_plugin_arg (optarg))
-	    einfo(_("%P%F: bad -plugin-opt option\n"));
+	    einfo (_("%P%F: bad -plugin-opt option\n"));
 	  break;
 #endif /* ENABLE_PLUGINS */
 	case 'q':
@@ -1375,12 +1407,6 @@ parse_args (unsigned argc, char **argv)
 	case OPTION_WARN_ONCE:
 	  config.warn_once = TRUE;
 	  break;
-	case OPTION_WARN_ORPHAN:
-	  config.warn_orphan = TRUE;
-	  break;
-	case OPTION_NO_WARN_ORPHAN:
-	  config.warn_orphan = FALSE;
-	  break;
 	case OPTION_WARN_SECTION_ALIGN:
 	  config.warn_section_align = TRUE;
 	  break;
@@ -1515,6 +1541,20 @@ parse_args (unsigned argc, char **argv)
 	case OPTION_PRINT_MEMORY_USAGE:
 	  command_line.print_memory_usage = TRUE;
 	  break;
+
+	case OPTION_ORPHAN_HANDLING:
+	  if (strcasecmp (optarg, "place") == 0)
+	    config.orphan_handling = orphan_handling_place;
+	  else if (strcasecmp (optarg, "warn") == 0)
+	    config.orphan_handling = orphan_handling_warn;
+	  else if (strcasecmp (optarg, "error") == 0)
+	    config.orphan_handling = orphan_handling_error;
+	  else if (strcasecmp (optarg, "discard") == 0)
+	    config.orphan_handling = orphan_handling_discard;
+	  else
+	    einfo (_("%P%F: invalid argument to option"
+		     " \"--orphan-handling\"\n"));
+	  break;
 	}
     }
 
@@ -1551,15 +1591,14 @@ parse_args (unsigned argc, char **argv)
   /* We may have -Bsymbolic, -Bsymbolic-functions, --dynamic-list-data,
      --dynamic-list-cpp-new, --dynamic-list-cpp-typeinfo and
      --dynamic-list FILE.  -Bsymbolic and -Bsymbolic-functions are
-     for shared libraries.  -Bsymbolic overrides all others and vice
-     versa.  */
+     for PIC outputs.  -Bsymbolic overrides all others and vice versa.  */
   switch (command_line.symbolic)
     {
     case symbolic_unset:
       break;
     case symbolic:
-      /* -Bsymbolic is for shared library only.  */
-      if (bfd_link_dll (&link_info))
+      /* -Bsymbolic is for PIC output only.  */
+      if (bfd_link_pic (&link_info))
 	{
 	  link_info.symbolic = TRUE;
 	  /* Should we free the unused memory?  */
@@ -1568,8 +1607,8 @@ parse_args (unsigned argc, char **argv)
 	}
       break;
     case symbolic_functions:
-      /* -Bsymbolic-functions is for shared library only.  */
-      if (bfd_link_dll (&link_info))
+      /* -Bsymbolic-functions is for PIC output only.  */
+      if (bfd_link_pic (&link_info))
 	command_line.dynamic_list = dynamic_list_data;
       break;
     }
@@ -1652,6 +1691,7 @@ set_segment_start (const char *section, char *valstr)
     if (strcmp (seg->name, name) == 0)
       {
 	seg->value = val;
+	lang_section_start (section, exp_intop (val), seg);
 	return;
       }
   /* There was no existing value so we must create a new segment
@@ -1720,10 +1760,21 @@ elf_shlib_list_options (FILE *file)
   fprintf (file, _("\
   -z origin                   Mark object requiring immediate $ORIGIN\n\
 				processing at runtime\n"));
+#if DEFAULT_LD_Z_RELRO
+  fprintf (file, _("\
+  -z relro                    Create RELRO program header (default)\n"));
+  fprintf (file, _("\
+  -z norelro                  Don't create RELRO program header\n"));
+#else
   fprintf (file, _("\
   -z relro                    Create RELRO program header\n"));
   fprintf (file, _("\
-  -z norelro                  Don't create RELRO program header\n"));
+  -z norelro                  Don't create RELRO program header (default)\n"));
+#endif
+  fprintf (file, _("\
+  -z common                   Generate common symbols with STT_COMMON type\n"));
+  fprintf (file, _("\
+  -z nocommon                 Generate common symbols with STT_OBJECT type\n"));
   fprintf (file, _("\
   -z stacksize=SIZE           Set size of stack segment\n"));
   fprintf (file, _("\
@@ -1742,6 +1793,13 @@ elf_static_list_options (FILE *file)
   fprintf (file, _("\
   --compress-debug-sections=[none|zlib|zlib-gnu|zlib-gabi]\n\
                               Compress DWARF debug sections using zlib\n"));
+#ifdef DEFAULT_FLAG_COMPRESS_DEBUG
+  fprintf (file, _("\
+                               Default: zlib-gabi\n"));
+#else
+  fprintf (file, _("\
+                               Default: none\n"));
+#endif
   fprintf (file, _("\
   -z common-page-size=SIZE    Set common page size to SIZE\n"));
   fprintf (file, _("\

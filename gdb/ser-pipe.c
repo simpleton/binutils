@@ -1,5 +1,5 @@
 /* Serial interface for a pipe to a separate program
-   Copyright (C) 1999-2015 Free Software Foundation, Inc.
+   Copyright (C) 1999-2016 Free Software Foundation, Inc.
 
    Contributed by Cygnus Solutions.
 
@@ -148,7 +148,7 @@ pipe_open (struct serial *scb, const char *name)
 static void
 pipe_close (struct serial *scb)
 {
-  struct pipe_state *state = scb->state;
+  struct pipe_state *state = (struct pipe_state *) scb->state;
 
   close (scb->fd);
   scb->fd = -1;

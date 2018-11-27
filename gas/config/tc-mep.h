@@ -1,5 +1,5 @@
 /* tc-mep.h -- Header file for tc-mep.c.
-   Copyright (C) 2001-2015 Free Software Foundation, Inc.
+   Copyright (C) 2001-2016 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -97,7 +97,8 @@ extern void mep_prepare_relax_scan (fragS *, offsetT *, relax_substateT);
 #define VTEXT_SECTION_NAME ".vtext"
 
 /* Needed to process pending instructions when a label is encountered.  */
-#define TC_START_LABEL(ch, s, ptr)    ((ch == ':') && mep_flush_pending_output ())
+#define TC_START_LABEL(STR, NUL_CHAR, NEXT_CHAR)	\
+  (NEXT_CHAR == ':' && mep_flush_pending_output ())
 
 #define tc_unrecognized_line(c) mep_unrecognized_line (c)
 extern int mep_unrecognized_line (int);
@@ -105,7 +106,7 @@ extern int mep_unrecognized_line (int);
 extern void mep_cleanup (void);
 
 #define md_elf_section_letter		mep_elf_section_letter
-extern bfd_vma mep_elf_section_letter (int, char **);
+extern bfd_vma mep_elf_section_letter (int, const char **);
 #define md_elf_section_flags		mep_elf_section_flags
 extern flagword mep_elf_section_flags  (flagword, bfd_vma, int);
 

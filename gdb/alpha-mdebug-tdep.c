@@ -1,5 +1,5 @@
 /* Target-dependent mdebug code for the ALPHA architecture.
-   Copyright (C) 1993-2015 Free Software Foundation, Inc.
+   Copyright (C) 1993-2016 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -197,7 +197,7 @@ alpha_mdebug_frame_unwind_cache (struct frame_info *this_frame,
   int ireg, returnreg;
 
   if (*this_prologue_cache)
-    return *this_prologue_cache;
+    return (struct alpha_mdebug_unwind_cache *) *this_prologue_cache;
 
   info = FRAME_OBSTACK_ZALLOC (struct alpha_mdebug_unwind_cache);
   *this_prologue_cache = info;
@@ -402,8 +402,6 @@ alpha_mdebug_frame_base_sniffer (struct frame_info *this_frame)
 void
 alpha_mdebug_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 {
-  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
-
   frame_unwind_append_unwinder (gdbarch, &alpha_mdebug_frame_unwind);
   frame_base_append_sniffer (gdbarch, alpha_mdebug_frame_base_sniffer);
 }

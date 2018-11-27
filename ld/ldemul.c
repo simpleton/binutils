@@ -1,5 +1,5 @@
 /* ldemul.c -- clearing house for ld emulation states
-   Copyright (C) 1991-2015 Free Software Foundation, Inc.
+   Copyright (C) 1991-2016 Free Software Foundation, Inc.
 
    This file is part of the GNU Binutils.
 
@@ -120,10 +120,6 @@ ldemul_open_dynamic_archive (const char *arch, search_dirs_type *search,
 lang_output_section_statement_type *
 ldemul_place_orphan (asection *s, const char *name, int constraint)
 {
-  if (config.warn_orphan)
-    einfo (_("%P: Warning: input section '%s' from file '%B' is not mentioned in linker script\n"),
-	   name, s->owner);
-
   if (ld_emulation->place_orphan)
     return (*ld_emulation->place_orphan) (s, name, constraint);
   return NULL;
@@ -332,7 +328,7 @@ ldemul_list_emulation_options (FILE *f)
 	}
     }
 
-  if (! options_found)
+  if (!options_found)
     fprintf (f, _("  no emulation specific options.\n"));
 }
 

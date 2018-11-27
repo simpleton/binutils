@@ -1,5 +1,5 @@
 # This shell script emits a C file. -*- C -*-
-# Copyright (C) 2007-2015 Free Software Foundation, Inc.
+# Copyright (C) 2007-2016 Free Software Foundation, Inc.
 # Contributed by M R Swami Reddy <MR.Swami.Reddy@nsc.com>
 #
 # This file is part of the GNU Binutils.
@@ -119,7 +119,7 @@ cr16elf_after_parse (void)
      is true the link sometimes fails.  */
   config.magic_demand_paged = FALSE;
 
-  after_parse_default ();
+  gld${EMULATION_NAME}_after_parse ();
 }
 
 /* This is called after the sections have been attached to output

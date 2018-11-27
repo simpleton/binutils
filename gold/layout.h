@@ -1,6 +1,6 @@
 // layout.h -- lay out output file sections for gold  -*- C++ -*-
 
-// Copyright (C) 2006-2015 Free Software Foundation, Inc.
+// Copyright (C) 2006-2016 Free Software Foundation, Inc.
 // Written by Ian Lance Taylor <iant@google.com>.
 
 // This file is part of gold.
@@ -764,7 +764,8 @@ class Layout
 	    || strncmp(name, ".gnu.linkonce.wi.",
 		       sizeof(".gnu.linkonce.wi.") - 1) == 0
 	    || strncmp(name, ".line", sizeof(".line") - 1) == 0
-	    || strncmp(name, ".stab", sizeof(".stab") - 1) == 0);
+	    || strncmp(name, ".stab", sizeof(".stab") - 1) == 0
+	    || strncmp(name, ".pdr", sizeof(".pdr") - 1) == 0);
   }
 
   // Return true if RELOBJ is an input file whose base name matches
@@ -901,6 +902,10 @@ class Layout
 			  const Output_data_reloc_generic* dyn_rel,
 			  bool add_debug, bool dynrel_includes_plt);
 
+  // Add a target-specific dynamic tag with constant value.
+  void
+  add_target_specific_dynamic_tag(elfcpp::DT tag, unsigned int val);
+
   // Compute and write out the build ID if needed.
   void
   write_build_id(Output_file*, unsigned char*, size_t) const;
@@ -1032,9 +1037,9 @@ class Layout
   void
   create_gold_note();
 
-  // Record whether the stack must be executable.
+  // Record whether the stack must be executable, and a user-supplied size.
   void
-  create_executable_stack_info();
+  create_stack_segment();
 
   // Create a build ID note if needed.
   void

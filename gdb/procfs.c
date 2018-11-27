@@ -1,6 +1,6 @@
 /* Machine independent support for SVR4 /proc (process file system) for GDB.
 
-   Copyright (C) 1999-2015 Free Software Foundation, Inc.
+   Copyright (C) 1999-2016 Free Software Foundation, Inc.
 
    Written by Michael Snyder at Cygnus Solutions.
    Based on work by Fred Fish, Stu Grossman, Geoff Noer, and others.
@@ -690,7 +690,7 @@ create_procinfo (int pid, int tid)
 						   create it if it
 						   doesn't exist yet?  */
 
-  pi = (procinfo *) xmalloc (sizeof (procinfo));
+  pi = XNEW (procinfo);
   memset (pi, 0, sizeof (procinfo));
   pi->pid = pid;
   pi->tid = tid;
@@ -918,7 +918,7 @@ load_syscalls (procinfo *pi)
       maxcall = syscalls[i].pr_number;
 
   pi->num_syscalls = maxcall+1;
-  pi->syscall_names = xmalloc (pi->num_syscalls * sizeof (char *));
+  pi->syscall_names = XNEWVEC (char *, pi->num_syscalls);
 
   for (i = 0; i < pi->num_syscalls; i++)
     pi->syscall_names[i] = NULL;
@@ -2490,7 +2490,7 @@ proc_get_LDT_entry (procinfo *pi, int key)
   /* Allocate space for one LDT entry.
      This alloc must persist, because we return a pointer to it.  */
   if (ldt_entry == NULL)
-    ldt_entry = (struct ssd *) xmalloc (sizeof (struct ssd));
+    ldt_entry = XNEW (struct ssd);
 
   /* Open the file descriptor for the LDT table.  */
   sprintf (pathname, "/proc/%d/ldt", pi->pid);
@@ -2731,7 +2731,7 @@ proc_update_threads (procinfo *pi)
   if ((nlwp = proc_get_nthreads (pi)) <= 1)
     return 1;	/* Process is not multi-threaded; nothing to do.  */
 
-  prstatus = xmalloc (sizeof (gdb_prstatus_t) * (nlwp + 1));
+  prstatus = XNEWVEC (gdb_prstatus_t, nlwp + 1);
 
   old_chain = make_cleanup (xfree, prstatus);
   if (ioctl (pi->ctl_fd, PIOCLSTATUS, prstatus) < 0)
@@ -2825,7 +2825,7 @@ proc_update_threads (procinfo *pi)
   if (nthreads < 2)
     return 0;		/* Nothing to do for 1 or fewer threads.  */
 
-  threads = xmalloc (nthreads * sizeof (tid_t));
+  threads = XNEWVEC (tid_t, nthreads);
 
   if (ioctl (pi->ctl_fd, PIOCTLIST, threads) < 0)
     proc_error (pi, "procfs: update_threads (PIOCTLIST)", __LINE__);
@@ -3716,7 +3716,7 @@ wait_again:
 		    else
 		      {
 			/* How to keep going without returning to wfi: */
-			target_resume (ptid, 0, GDB_SIGNAL_0);
+			target_continue_no_signal (ptid);
 			goto wait_again;
 		      }
 		  }
@@ -3742,7 +3742,7 @@ wait_again:
 		    /* This is an internal event and should be transparent
 		       to wfi, so resume the execution and wait again.	See
 		       comment in procfs_init_inferior() for more details.  */
-		    target_resume (ptid, 0, GDB_SIGNAL_0);
+		    target_continue_no_signal (ptid);
 		    goto wait_again;
 		  }
 #endif

@@ -1,5 +1,5 @@
 /* IA-64 support for 64-bit ELF
-   Copyright (C) 1998-2015 Free Software Foundation, Inc.
+   Copyright (C) 1998-2016 Free Software Foundation, Inc.
    Contributed by David Mosberger-Tang <davidm@hpl.hp.com>
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -2992,7 +2992,7 @@ elfNN_ia64_size_dynamic_sections (bfd *output_bfd ATTRIBUTE_UNUSED,
 
   /* Set the contents of the .interp section to the interpreter.  */
   if (ia64_info->root.dynamic_sections_created
-      && bfd_link_executable (info))
+      && bfd_link_executable (info) && !info->nointerp)
     {
       sec = bfd_get_linker_section (dynobj, ".interp");
       BFD_ASSERT (sec != NULL);
@@ -4428,10 +4428,9 @@ elfNN_ia64_relocate_section (bfd *output_bfd,
 	    else
 	      name = bfd_elf_sym_name (input_bfd, symtab_hdr, sym,
 				       sym_sec);
-	    if (!(*info->callbacks->warning) (info, _("unsupported reloc"),
-					      name, input_bfd,
-					      input_section, rel->r_offset))
-	      return FALSE;
+	    (*info->callbacks->warning) (info, _("unsupported reloc"),
+					 name, input_bfd,
+					 input_section, rel->r_offset);
 	    ret_val = FALSE;
 	  }
 	  break;
@@ -4487,15 +4486,14 @@ missing_tls_sec:
 		    break;
 		  }
 	      default:
-		if (!(*info->callbacks->reloc_overflow) (info,
-							 &h->root,
-							 name,
-							 howto->name,
-							 (bfd_vma) 0,
-							 input_bfd,
-							 input_section,
-							 rel->r_offset))
-		  return FALSE;
+		(*info->callbacks->reloc_overflow) (info,
+						    &h->root,
+						    name,
+						    howto->name,
+						    (bfd_vma) 0,
+						    input_bfd,
+						    input_section,
+						    rel->r_offset);
 		break;
 	      }
 

@@ -1,6 +1,6 @@
 // script.cc -- handle linker scripts for gold.
 
-// Copyright (C) 2006-2015 Free Software Foundation, Inc.
+// Copyright (C) 2006-2016 Free Software Foundation, Inc.
 // Written by Ian Lance Taylor <iant@google.com>.
 
 // This file is part of gold.
@@ -987,7 +987,7 @@ Symbol_assignment::sized_finalize(Symbol_table* symtab, const Layout* layout,
 						  is_dot_available,
 						  dot_value, dot_section,
 						  &section, NULL, &type,
-						  &vis, &nonvis, false);
+						  &vis, &nonvis, false, NULL);
   Sized_symbol<size>* ssym = symtab->get_sized_symbol<size>(this->sym_);
   ssym->set_value(final_val);
   ssym->set_type(type);
@@ -1009,11 +1009,12 @@ Symbol_assignment::set_if_absolute(Symbol_table* symtab, const Layout* layout,
     return;
 
   Output_section* val_section;
+  bool is_valid;
   uint64_t val = this->val_->eval_maybe_dot(symtab, layout, false,
 					    is_dot_available, dot_value,
 					    dot_section, &val_section, NULL,
-					    NULL, NULL, NULL, false);
-  if (val_section != NULL && val_section != dot_section)
+					    NULL, NULL, NULL, false, &is_valid);
+  if (!is_valid || (val_section != NULL && val_section != dot_section))
     return;
 
   if (parameters->target().get_size() == 32)
@@ -1754,6 +1755,7 @@ script_keyword_parsecodes[] =
   { "FLOAT", FLOAT },
   { "FORCE_COMMON_ALLOCATION", FORCE_COMMON_ALLOCATION },
   { "GROUP", GROUP },
+  { "HIDDEN", HIDDEN },
   { "HLL", HLL },
   { "INCLUDE", INCLUDE },
   { "INFO", INFO },
@@ -1791,6 +1793,7 @@ script_keyword_parsecodes[] =
   { "SIZEOF_HEADERS", SIZEOF_HEADERS },
   { "SORT", SORT_BY_NAME },
   { "SORT_BY_ALIGNMENT", SORT_BY_ALIGNMENT },
+  { "SORT_BY_INIT_PRIORITY", SORT_BY_INIT_PRIORITY },
   { "SORT_BY_NAME", SORT_BY_NAME },
   { "SPECIAL", SPECIAL },
   { "SQUAD", SQUAD },
@@ -2694,7 +2697,7 @@ script_add_library(void* closurev, const char* name, size_t length)
 
   if (name_string[0] != 'l')
     gold_error(_("library name must be prefixed with -l"));
-    
+
   Input_file_argument file(name_string.c_str() + 1,
 			   Input_file_argument::INPUT_FILE_TYPE_LIBRARY,
 			   "", false,

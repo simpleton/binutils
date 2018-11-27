@@ -1,6 +1,6 @@
 /* Definitions for symbol file management in GDB.
 
-   Copyright (C) 1992-2015 Free Software Foundation, Inc.
+   Copyright (C) 1992-2016 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -743,6 +743,11 @@ const char *objfile_filename (const struct objfile *objfile);
 /* Return the name to print for OBJFILE in debugging messages.  */
 
 extern const char *objfile_debug_name (const struct objfile *objfile);
+
+/* Return the name of the file format of OBJFILE if the file has been opened,
+   otherwise return NULL.  */
+
+const char *objfile_flavour_name (struct objfile *objfile);
 
 /* Set the objfile's notion of the "main" name and language.  */
 
