@@ -7134,13 +7134,6 @@ gdb_ust_init (void)
 
 #include <sys/syscall.h>
 
-#ifdef __ANDROID__
-/* Work around buggy NDK headers */
-#ifndef SYS_gettid
-#define SYS_gettid __NR_gettid
-#endif
-#endif
-
 static void
 gdb_agent_remove_socket (void)
 {
