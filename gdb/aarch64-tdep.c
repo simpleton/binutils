@@ -2297,7 +2297,7 @@ aarch64_grok_minidump_registers (struct gdbarch *gdbarch,
   static const uint32_t have_floats = 0x80000004;
 
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
-  const uint8_t *pos = regdata;
+  const uint8_t *pos = (const uint8_t*) regdata;
   const uint8_t *end = pos + regsize;
   uint64_t flags;
   int regnum;
